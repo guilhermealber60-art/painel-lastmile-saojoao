@@ -268,6 +268,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
     <button data-view="retirada">Retirada</button>
     <button data-view="entrega">Entrega</button>
     <button data-view="suspeitas">Alertas</button>
+    <button data-view="fora">Fora Abbiamo</button>
   </div>
   <div class="exportmenu" id="exportMenu">
     <button class="topbtn" id="btnExportPedidos">Exportar pedidos ▾</button>
@@ -411,21 +412,63 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <span class="sub">indícios de finalização em massa ou fora do fluxo</span>
       <div class="panel-actions">
         <button class="iconbtn" data-export="suspeitas">Exportar todas</button>
+        <button class="iconbtn" id="btnToggleSuspeitas">Ocultar</button>
       </div>
     </div>
-    <div class="grid2">
-      <div class="card">
-        <div class="table-wrap" id="rankSuspeitas"></div>
+    <div id="suspeitasBody">
+      <div class="grid2">
+        <div class="card">
+          <div class="table-wrap" id="rankSuspeitas"></div>
+        </div>
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Top 10 — score de indícios</h3>
+          <div id="suspeitasChart"></div>
+        </div>
       </div>
-      <div class="card">
-        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Top 10 — score de indícios</h3>
-        <div id="suspeitasChart"></div>
+      <p style="font-size:11px;color:var(--ink-muted);margin-top:10px">
+        <b>Atenção:</b> rajada, quase-simultâneas e ocioso→rajada são <b>indícios</b>, não conclusões. Servem para orientar
+        a cobrança direcionada por distrital/filial — não substituem a apuração operacional caso a caso.
+      </p>
+    </div>
+  </section>
+
+  <section class="panel" id="sec-fora" data-section="fora">
+    <div class="panel-head">
+      <h2>Pedidos fora do Abbiamo <span class="badge-count" id="foraCount">0</span></h2>
+      <span class="sub">pedidos VTEX sem correspondência na plataforma Abbiamo</span>
+      <div class="panel-actions">
+        <button class="iconbtn" data-export="fora-todos">Exportar todos</button>
+        <button class="iconbtn" id="btnToggleFora">Ocultar</button>
       </div>
     </div>
-    <p style="font-size:11px;color:var(--ink-muted);margin-top:10px">
-      <b>Atenção:</b> rajada, quase-simultâneas e ocioso→rajada são <b>indícios</b>, não conclusões. Servem para orientar
-      a cobrança direcionada por distrital/filial — não substituem a apuração operacional caso a caso.
-    </p>
+    <div id="foraBody">
+      <div class="kpi-grid" id="foraKpis"></div>
+      <p class="hint" id="foraNote" style="margin-top:10px;display:none"></p>
+      <div class="grid2" style="margin-top:14px">
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com mais pedidos fora</h3>
+          <div class="table-wrap" id="rankForaFilial"></div>
+          <button class="iconbtn" style="margin-top:8px" data-export="fora-filial">Exportar todas</button>
+        </div>
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Coordenadores com mais pedidos fora</h3>
+          <div class="table-wrap" id="rankForaCoordenador"></div>
+          <button class="iconbtn" style="margin-top:8px" data-export="fora-coordenador">Exportar todos</button>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:14px">
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Distritais com mais pedidos fora</h3>
+          <div class="table-wrap" id="rankForaDistrital"></div>
+          <button class="iconbtn" style="margin-top:8px" data-export="fora-distrital">Exportar todos</button>
+        </div>
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Diretorias com mais pedidos fora</h3>
+          <div class="table-wrap" id="rankForaDiretor"></div>
+          <button class="iconbtn" style="margin-top:8px" data-export="fora-diretor">Exportar todas</button>
+        </div>
+      </div>
+    </div>
   </section>
 
 </main>
@@ -653,6 +696,8 @@ const state = {
   coberturaVisible: true,
   retiradaVisible: true,
   entregaVisible: true,
+  suspeitasVisible: true,
+  foraVisible: true,
   entregaModalTab: 'Todas',
 };
 
@@ -671,8 +716,14 @@ function pickOrderFields(r){
     statusUpdatedAt:r.order_status_updated_at,
   };
 }
+/* Possíveis nomes da coluna de loja/filial no Report do VTEX (autodetecção). */
+const REPORT_SELLER_KEYS = ['Seller','seller','Seller Name','Seller Id','SellerId','Loja','loja','Filial','filial','Store','store','Warehouse','warehouse','Cod Loja','Código Loja','Codigo Loja','Cód Loja'];
+function pickReportSeller(r){
+  for (const k of REPORT_SELLER_KEYS){ if (r[k]!=null && String(r[k]).trim()!=='') return String(r[k]).trim(); }
+  return '';
+}
 function pickReportFields(r){
-  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'] };
+  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'], seller:pickReportSeller(r) };
 }
 function dedupeReportByOrder(rows){
   const m = new Map();
@@ -927,6 +978,7 @@ function renderAll(){
   renderRetirada(filtered);
   renderEntrega(filtered);
   renderSuspeitas(filtered);
+  renderFora();
   renderStatusLine();
   applyViewVisibility();
 }
@@ -1070,6 +1122,110 @@ function renderSuspeitas(rows){
     : '';
 }
 
+/* =====================================================================
+   PEDIDOS FORA DO ABBIAMO (VTEX sem correspondência na Abbiamo)
+   Não usa o pipeline joined (esses pedidos não existem na Abbiamo);
+   calcula direto de rawReport × rawOrders, mapeando a loja do Report → gestor.
+===================================================================== */
+function computeFora(){
+  const f = state.filters;
+  const abbiamo = new Set(state.rawOrders.map(o => o.on));
+  const gBySeller = new Map(state.gestores.map(g => [String(g.cod).trim(), g]));
+  const gByName = new Map(state.gestores.map(g => [String(g.filial).trim().toLowerCase(), g]));
+  let totalVtex = 0;
+  const foraAll = [];
+  for (const rep of state.rawReport){
+    const creation = parseISODate(rep.creation);
+    if (f.from && (!creation || creation < f.from)) continue;
+    if (f.to && (!creation || creation > f.to)) continue;
+    totalVtex++;
+    if (abbiamo.has(rep.order)) continue;
+    const sk = (rep.seller || '').trim();
+    let g = null;
+    if (sk) g = gBySeller.get(sk) || gByName.get(sk.toLowerCase()) || null;
+    foraAll.push({
+      order: rep.order, creation, sellerRaw: sk, courrier: rep.courrier || '',
+      sellerId: g ? String(g.cod).trim() : sk,
+      filial: g ? g.filial : (sk || '—'),
+      diretor: g ? g.diretor : '', distrital: g ? g.distrital : '',
+      coordenador: g ? g.coordenador : '', regional: g ? g.coordenador : '',
+    });
+  }
+  const foraFiltered = foraAll.filter(r => {
+    if (f.diretor && r.diretor !== f.diretor) return false;
+    if (f.distrital && r.distrital !== f.distrital) return false;
+    if (f.regional && r.regional !== f.regional) return false;
+    if (f.filiais.size && !f.filiais.has(r.sellerId)) return false;
+    return true;
+  });
+  return { totalVtex, foraTotal: foraAll.length, foraAll, foraFiltered };
+}
+
+function groupForaBy(list, keyFn){
+  const m = new Map();
+  for (const r of list){
+    const key = keyFn(r) || '—';
+    m.set(key, (m.get(key) || 0) + 1);
+  }
+  return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a,b) => b.value - a.value);
+}
+
+function renderForaRankTable(elId, list, headLabel, total, emptyMsg){
+  const el = document.getElementById(elId);
+  if (!list.length){ el.innerHTML = `<p style="padding:10px;color:var(--ink-muted);font-size:12px">${escapeHtml(emptyMsg || 'Sem ocorrências no filtro atual.')}</p>`; return; }
+  let html = `<table class="dtable"><thead><tr><th>${escapeHtml(headLabel)}</th><th>Qtd fora</th><th>% do fora</th></tr></thead><tbody>`;
+  for (const r of list) html += `<tr><td>${escapeHtml(r.label)}</td><td class="mono">${fmtInt(r.value)}</td><td class="mono">${fmtPct(total ? r.value/total : 0)}</td></tr>`;
+  html += `</tbody></table>`;
+  el.innerHTML = html;
+}
+
+function renderFora(){
+  const d = computeFora();
+  document.getElementById('foraCount').textContent = fmtInt(d.foraFiltered.length);
+
+  const taxa = d.totalVtex ? d.foraTotal / d.totalVtex : null;
+  const kpis = [
+    { lbl:'Pedidos VTEX (total)', val:fmtInt(d.totalVtex) },
+    { lbl:'Casados com Abbiamo', val:fmtInt(d.totalVtex - d.foraTotal), accent:'green' },
+    { lbl:'Fora do Abbiamo', val:fmtInt(d.foraFiltered.length), accent: d.foraFiltered.length>0 ? 'red' : undefined },
+    { lbl:'Taxa fora', val:fmtPct(taxa), sub:'fora ÷ total VTEX', accent: (taxa!=null && taxa>=0.02) ? 'red' : 'blue' },
+  ];
+  document.getElementById('foraKpis').innerHTML = kpis.map(kpiCard).join('');
+
+  const hasBranch = d.foraFiltered.some(r => r.sellerRaw);
+  const note = document.getElementById('foraNote');
+  if (d.foraTotal > 0 && !hasBranch){
+    note.style.display = 'block';
+    note.innerHTML = '<b>Rankings por filial/gestor indisponíveis:</b> o Report do VTEX carregado não tem a coluna de loja/filial. Reenvie o Report atualizado (com a coluna de loja) em "Atualizar dados" para preencher os rankings abaixo.';
+  } else {
+    note.style.display = 'none';
+  }
+
+  const total = d.foraFiltered.length;
+  const emptyMsg = d.foraTotal > 0 && !hasBranch ? 'Sem coluna de loja no Report do VTEX (veja o aviso acima).' : 'Nenhum pedido fora no filtro atual.';
+
+  const byFilial = groupForaBy(d.foraFiltered, r => r.filial);
+  renderForaRankTable('rankForaFilial', byFilial.slice(0,10), 'Filial', total, emptyMsg);
+  const byCoord = groupForaBy(d.foraFiltered, r => r.coordenador);
+  renderForaRankTable('rankForaCoordenador', byCoord.slice(0,10), 'Coordenador', total, emptyMsg);
+  const byDist = groupForaBy(d.foraFiltered, r => r.distrital);
+  renderForaRankTable('rankForaDistrital', byDist.slice(0,10), 'Distrital', total, emptyMsg);
+  const byDir = groupForaBy(d.foraFiltered, r => r.diretor);
+  renderForaRankTable('rankForaDiretor', byDir.slice(0,10), 'Diretoria', total, emptyMsg);
+
+  state._rankFull = state._rankFull || {};
+  state._rankFull['fora-todos'] = d.foraFiltered.map(r => ({
+    Pedido:r.order, 'Loja (Report)':r.sellerRaw, Filial:r.filial,
+    Coordenador:r.coordenador, Distrital:r.distrital, Diretor:r.diretor,
+    'Criação VTEX':fmtDate(r.creation), Plataforma:r.courrier,
+  }));
+  const dump = (list, colName) => list.map(x => ({ [colName]:x.label, 'Qtd fora':x.value, '% do fora': fmtPct(total ? x.value/total : 0) }));
+  state._rankFull['fora-filial'] = dump(byFilial, 'Filial');
+  state._rankFull['fora-coordenador'] = dump(byCoord, 'Coordenador');
+  state._rankFull['fora-distrital'] = dump(byDist, 'Distrital');
+  state._rankFull['fora-diretor'] = dump(byDir, 'Diretoria');
+}
+
 function renderStatusLine(){
   const total = state.joined.length;
   document.getElementById('statusLine').textContent = `${fmtInt(total)} pedidos válidos carregados · ${fmtInt(state.gestores.length)} filiais na base de gestores`;
@@ -1085,6 +1241,8 @@ function applyViewVisibility(){
   document.getElementById('coberturaBody').style.display = state.coberturaVisible ? '' : 'none';
   document.getElementById('retiradaBody').style.display = state.retiradaVisible ? '' : 'none';
   document.getElementById('entregaBody').style.display = state.entregaVisible ? '' : 'none';
+  document.getElementById('suspeitasBody').style.display = state.suspeitasVisible ? '' : 'none';
+  document.getElementById('foraBody').style.display = state.foraVisible ? '' : 'none';
 }
 
 /* =====================================================================
@@ -1171,6 +1329,16 @@ document.getElementById('btnToggleRetirada').onclick = (e) => {
 document.getElementById('btnToggleEntrega').onclick = (e) => {
   state.entregaVisible = !state.entregaVisible;
   e.target.textContent = state.entregaVisible ? 'Ocultar' : 'Mostrar';
+  applyViewVisibility();
+};
+document.getElementById('btnToggleSuspeitas').onclick = (e) => {
+  state.suspeitasVisible = !state.suspeitasVisible;
+  e.target.textContent = state.suspeitasVisible ? 'Ocultar' : 'Mostrar';
+  applyViewVisibility();
+};
+document.getElementById('btnToggleFora').onclick = (e) => {
+  state.foraVisible = !state.foraVisible;
+  e.target.textContent = state.foraVisible ? 'Ocultar' : 'Mostrar';
   applyViewVisibility();
 };
 
