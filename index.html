@@ -1127,11 +1127,24 @@ function renderSuspeitas(rows){
    Não usa o pipeline joined (esses pedidos não existem na Abbiamo);
    calcula direto de rawReport × rawOrders, mapeando a loja do Report → gestor.
 ===================================================================== */
+/* Normaliza código de filial: tira espaços e zeros à esquerda ("0351" → "351"),
+   para casar o "Seller Name" do VTEX com o "cod" da base de gestores. */
+function normCod(c){ const s = String(c==null?'':c).trim(); return s.replace(/^0+/, '') || s; }
+/* "PELOTAS 12 - 88212113032990 - 0351" → código = último segmento ("0351"). */
+function sellerNameToCod(sellerName){
+  const parts = String(sellerName||'').split(' - ');
+  return parts.length ? parts[parts.length-1].trim() : '';
+}
+/* Nome amigável da filial a partir do Seller Name ("PELOTAS 12 - ... - 0351" → "PELOTAS 12"). */
+function sellerNameToLabel(sellerName){
+  const parts = String(sellerName||'').split(' - ');
+  return (parts[0]||'').trim() || String(sellerName||'').trim();
+}
+
 function computeFora(){
   const f = state.filters;
   const abbiamo = new Set(state.rawOrders.map(o => o.on));
-  const gBySeller = new Map(state.gestores.map(g => [String(g.cod).trim(), g]));
-  const gByName = new Map(state.gestores.map(g => [String(g.filial).trim().toLowerCase(), g]));
+  const gByCod = new Map(state.gestores.map(g => [normCod(g.cod), g]));
   let totalVtex = 0;
   const foraAll = [];
   for (const rep of state.rawReport){
@@ -1141,12 +1154,12 @@ function computeFora(){
     totalVtex++;
     if (abbiamo.has(rep.order)) continue;
     const sk = (rep.seller || '').trim();
-    let g = null;
-    if (sk) g = gBySeller.get(sk) || gByName.get(sk.toLowerCase()) || null;
+    const cod = sellerNameToCod(sk);
+    const g = cod ? (gByCod.get(normCod(cod)) || null) : null;
     foraAll.push({
       order: rep.order, creation, sellerRaw: sk, courrier: rep.courrier || '',
-      sellerId: g ? String(g.cod).trim() : sk,
-      filial: g ? g.filial : (sk || '—'),
+      sellerId: g ? String(g.cod).trim() : normCod(cod),
+      filial: g ? g.filial : (sellerNameToLabel(sk) || '—'),
       diretor: g ? g.diretor : '', distrital: g ? g.distrital : '',
       coordenador: g ? g.coordenador : '', regional: g ? g.coordenador : '',
     });
