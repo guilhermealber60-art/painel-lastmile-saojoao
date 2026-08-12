@@ -606,6 +606,9 @@ function parseISODate(s){
   const d = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]);
   return isNaN(d.getTime()) ? null : d;
 }
+/* As datas da Abbiamo vêm em formatos misturados: dd/mm/yyyy hh:mm (BR) e
+   yyyy-mm-dd hh:mm:ss (ISO). Aceita os dois. */
+function parseAnyDate(s){ return parseBRDate(s) || parseISODate(s); }
 function diffMinutes(a,b){ return (a.getTime()-b.getTime())/60000; }
 function fmtMinutes(min){
   if (min==null || !isFinite(min)) return '—';
@@ -728,9 +731,9 @@ function buildJoined(){
     if (!VALID_ORIGINS.has(o.oco)) continue;
     const rep = reportByOrder.get(o.on) || null;
     const gestor = gestorBySeller.get(o.sid) || null;
-    const createdAtAbbiamo = parseBRDate(o.createdAt);
-    const promisedDate = parseBRDate(o.promised);
-    const deliveredDate = parseBRDate(o.delivered);
+    const createdAtAbbiamo = parseAnyDate(o.createdAt);
+    const promisedDate = parseAnyDate(o.promised);
+    const deliveredDate = parseAnyDate(o.delivered);
     const vtexCreation = rep ? parseISODate(rep.creation) : null;
     const promisedMinutes = (promisedDate && createdAtAbbiamo) ? diffMinutes(promisedDate, createdAtAbbiamo) : (rep ? parseDeadlineToMinutes(rep.deadline) : null);
     let modalidade;
@@ -742,8 +745,8 @@ function buildJoined(){
       sellerId:o.sid, sellerName:o.stn,
       carrier:o.carrier||'', driver:o.driver||'',
       createdAtAbbiamo, promisedDate, deliveredDate,
-      evDispatched:parseBRDate(o.evDispatched), evInTransit:parseBRDate(o.evInTransit),
-      evCollected:parseBRDate(o.evCollected), evDelivered:parseBRDate(o.evDelivered),
+      evDispatched:parseAnyDate(o.evDispatched), evInTransit:parseAnyDate(o.evInTransit),
+      evCollected:parseAnyDate(o.evCollected), evDelivered:parseAnyDate(o.evDelivered),
       vtexCreation, courrier:rep?rep.courrier:null, modalidade,
       diretor:gestor?gestor.diretor:'', distrital:gestor?gestor.distrital:'', coordenador:gestor?gestor.coordenador:'',
       regional:gestor?gestor.coordenador:'', uf:gestor?gestor.uf:'',
