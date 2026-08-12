@@ -434,39 +434,20 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 
   <section class="panel" id="sec-fora" data-section="fora">
     <div class="panel-head">
-      <h2>Pedidos fora do Abbiamo <span class="badge-count" id="foraCount">0</span></h2>
-      <span class="sub">pedidos VTEX sem correspondência na plataforma Abbiamo</span>
+      <h2>Fora do Abbiamo <span class="badge-count" id="foraCount">0</span></h2>
+      <span class="sub">filiais com modalidade na VTEX mas sem cobertura na Abbiamo</span>
       <div class="panel-actions">
-        <button class="iconbtn" data-export="fora-todos">Exportar todos</button>
+        <button class="iconbtn" data-export="fora-cobertura">Exportar todas</button>
         <button class="iconbtn" id="btnToggleFora">Ocultar</button>
       </div>
     </div>
     <div id="foraBody">
       <div class="kpi-grid" id="foraKpis"></div>
       <p class="hint" id="foraNote" style="margin-top:10px;display:none"></p>
-      <div class="grid2" style="margin-top:14px">
-        <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com mais pedidos fora</h3>
-          <div class="table-wrap" id="rankForaFilial"></div>
-          <button class="iconbtn" style="margin-top:8px" data-export="fora-filial">Exportar todas</button>
-        </div>
-        <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Coordenadores com mais pedidos fora</h3>
-          <div class="table-wrap" id="rankForaCoordenador"></div>
-          <button class="iconbtn" style="margin-top:8px" data-export="fora-coordenador">Exportar todos</button>
-        </div>
-      </div>
-      <div class="grid2" style="margin-top:14px">
-        <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Distritais com mais pedidos fora</h3>
-          <div class="table-wrap" id="rankForaDistrital"></div>
-          <button class="iconbtn" style="margin-top:8px" data-export="fora-distrital">Exportar todos</button>
-        </div>
-        <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Diretorias com mais pedidos fora</h3>
-          <div class="table-wrap" id="rankForaDiretor"></div>
-          <button class="iconbtn" style="margin-top:8px" data-export="fora-diretor">Exportar todas</button>
-        </div>
+      <div class="card" style="margin-top:14px">
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com cobertura incompleta na Abbiamo</h3>
+        <div class="table-wrap" id="foraCoverTable"></div>
+        <button class="iconbtn" style="margin-top:8px" data-export="fora-cobertura">Exportar todas</button>
       </div>
     </div>
   </section>
@@ -1141,109 +1122,111 @@ function sellerNameToLabel(sellerName){
   return (parts[0]||'').trim() || String(sellerName||'').trim();
 }
 
-function computeFora(){
+/* Cobertura por filial: compara, por filial, a presença de Retirada (TAKEOUT) e
+   Entrega (DELIVERY) na VTEX vs na Abbiamo. Lista só as filiais que TÊM a
+   modalidade na VTEX mas NÃO na Abbiamo (gap de cadastro/integração). */
+function computeForaCobertura(){
   const f = state.filters;
-  // Só casa contra pedidos Abbiamo de origem válida (VTEX/API) — HERMES-FORM e
-  // HERMES-DUPLICATE são ignorados em todos os indicadores, igual ao buildJoined.
-  const abbiamo = new Set(state.rawOrders.filter(o => VALID_ORIGINS.has(o.oco)).map(o => o.on));
   const gByCod = new Map(state.gestores.map(g => [normCod(g.cod), g]));
-  let totalVtex = 0;
-  const foraAll = [];
+  const map = new Map();
+  const ensure = (key) => {
+    if (!map.has(key)){
+      const g = gByCod.get(key) || null;
+      map.set(key, {
+        sellerId: g ? String(g.cod).trim() : key,
+        filial: g ? g.filial : '', vtexLabel: '',
+        coordenador: g ? g.coordenador : '', distrital: g ? g.distrital : '',
+        diretor: g ? g.diretor : '', regional: g ? g.coordenador : '',
+        vtexRetN: 0, vtexEntN: 0, abbRetN: 0, abbEntN: 0,
+      });
+    }
+    return map.get(key);
+  };
+  // Lado VTEX (só linhas com Seller Name → filial identificável)
   for (const rep of state.rawReport){
+    const sk = (rep.seller || '').trim();
+    if (!sk) continue;
     const creation = parseISODate(rep.creation);
     if (f.from && (!creation || creation < f.from)) continue;
     if (f.to && (!creation || creation > f.to)) continue;
-    totalVtex++;
-    if (abbiamo.has(rep.order)) continue;
-    const sk = (rep.seller || '').trim();
-    const cod = sellerNameToCod(sk);
-    const g = cod ? (gByCod.get(normCod(cod)) || null) : null;
-    foraAll.push({
-      order: rep.order, creation, sellerRaw: sk, courrier: rep.courrier || '',
-      sellerId: g ? String(g.cod).trim() : normCod(cod),
-      filial: g ? g.filial : (sellerNameToLabel(sk) || '—'),
-      diretor: g ? g.diretor : '', distrital: g ? g.distrital : '',
-      coordenador: g ? g.coordenador : '', regional: g ? g.coordenador : '',
-    });
+    const key = normCod(sellerNameToCod(sk));
+    if (!key) continue;
+    const e = ensure(key);
+    if (!e.vtexLabel) e.vtexLabel = sellerNameToLabel(sk);
+    if (/retirada em loja/i.test(rep.courrier || '')) e.vtexRetN++; else e.vtexEntN++;
   }
-  // Decisão de negócio: só contabiliza pedidos fora que TÊM filial identificável no
-  // Report (Seller Name preenchido). Os sem Seller Name (majoritariamente Retirada
-  // em Loja) ficam de fora da taxa e dos rankings, apenas reportados numa nota.
-  const foraWithBranch = foraAll.filter(r => r.sellerRaw);
-  const foraSemFilial = foraAll.length - foraWithBranch.length;
-  const foraFiltered = foraWithBranch.filter(r => {
-    if (f.diretor && r.diretor !== f.diretor) return false;
-    if (f.distrital && r.distrital !== f.distrital) return false;
-    if (f.regional && r.regional !== f.regional) return false;
-    if (f.filiais.size && !f.filiais.has(r.sellerId)) return false;
-    return true;
-  });
-  return { totalVtex, foraTotalAll: foraAll.length, foraComFilial: foraWithBranch.length, foraSemFilial, foraFiltered };
-}
-
-function groupForaBy(list, keyFn, emptyLabel){
-  const m = new Map();
-  for (const r of list){
-    const key = keyFn(r) || (emptyLabel || '—');
-    m.set(key, (m.get(key) || 0) + 1);
+  const totalFiliaisVtex = map.size;
+  // Lado Abbiamo (só origens válidas; só filiais que já aparecem na VTEX)
+  for (const o of state.rawOrders){
+    if (!VALID_ORIGINS.has(o.oco)) continue;
+    const key = normCod(o.sid);
+    if (!key || !map.has(key)) continue;
+    const created = parseBRDate(o.createdAt);
+    if (f.from && (!created || created < f.from)) continue;
+    if (f.to && (!created || created > f.to)) continue;
+    const e = map.get(key);
+    if (o.ot === 'TAKEOUT') e.abbRetN++; else if (o.ot === 'DELIVERY') e.abbEntN++;
   }
-  return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a,b) => b.value - a.value);
-}
-
-function renderForaRankTable(elId, list, headLabel, total, emptyMsg){
-  const el = document.getElementById(elId);
-  if (!list.length){ el.innerHTML = `<p style="padding:10px;color:var(--ink-muted);font-size:12px">${escapeHtml(emptyMsg || 'Sem ocorrências no filtro atual.')}</p>`; return; }
-  let html = `<table class="dtable"><thead><tr><th>${escapeHtml(headLabel)}</th><th>Qtd fora</th><th>% do fora</th></tr></thead><tbody>`;
-  for (const r of list) html += `<tr><td>${escapeHtml(r.label)}</td><td class="mono">${fmtInt(r.value)}</td><td class="mono">${fmtPct(total ? r.value/total : 0)}</td></tr>`;
-  html += `</tbody></table>`;
-  el.innerHTML = html;
+  // Classifica gaps
+  const rows = [];
+  for (const e of map.values()){
+    const vHasRet = e.vtexRetN > 0, vHasEnt = e.vtexEntN > 0;
+    const aHasRet = e.abbRetN > 0, aHasEnt = e.abbEntN > 0;
+    const gap = (vHasRet && !aHasRet) || (vHasEnt && !aHasEnt);
+    if (!gap) continue;
+    if (f.diretor && e.diretor !== f.diretor) continue;
+    if (f.distrital && e.distrital !== f.distrital) continue;
+    if (f.regional && e.regional !== f.regional) continue;
+    if (f.filiais.size && !f.filiais.has(e.sellerId)) continue;
+    let sinal, level;
+    if (!aHasRet && !aHasEnt){ sinal = 'nenhum pedido'; level = 'crit'; }
+    else if (aHasRet && !aHasEnt){ sinal = 'só retirada'; level = 'alert'; }
+    else { sinal = 'só entrega'; level = 'alert'; }
+    rows.push({ ...e, filialNome: e.filial || e.vtexLabel || e.sellerId, vHasRet, vHasEnt, sinal, level, vtexTotal: e.vtexRetN + e.vtexEntN });
+  }
+  rows.sort((a,b) => b.vtexTotal - a.vtexTotal);
+  return { rows, totalFiliaisVtex };
 }
 
 function renderFora(){
-  const d = computeFora();
-  document.getElementById('foraCount').textContent = fmtInt(d.foraFiltered.length);
+  const d = computeForaCobertura();
+  document.getElementById('foraCount').textContent = fmtInt(d.rows.length);
 
-  const taxa = d.totalVtex ? d.foraComFilial / d.totalVtex : null;
+  const nenhum = d.rows.filter(r => r.sinal === 'nenhum pedido').length;
+  const soRet = d.rows.filter(r => r.sinal === 'só retirada').length;
+  const soEnt = d.rows.filter(r => r.sinal === 'só entrega').length;
   const kpis = [
-    { lbl:'Pedidos VTEX (total)', val:fmtInt(d.totalVtex) },
-    { lbl:'Casados com Abbiamo', val:fmtInt(d.totalVtex - d.foraTotalAll), accent:'green' },
-    { lbl:'Fora do Abbiamo', val:fmtInt(d.foraFiltered.length), sub:'só com filial identificada', accent: d.foraFiltered.length>0 ? 'red' : undefined },
-    { lbl:'Taxa fora', val:fmtPct(taxa), sub:'fora c/ filial ÷ total VTEX', accent: (taxa!=null && taxa>=0.02) ? 'red' : 'blue' },
+    { lbl:'Filiais com pedido VTEX', val:fmtInt(d.totalFiliaisVtex) },
+    { lbl:'Filiais com gap na Abbiamo', val:fmtInt(d.rows.length), accent: d.rows.length>0 ? 'red' : undefined },
+    { lbl:'Nenhum pedido na Abbiamo', val:fmtInt(nenhum), accent: nenhum>0 ? 'red' : undefined },
+    { lbl:'Cobertura parcial', val:fmtInt(soRet+soEnt), sub:`${soRet} só retirada · ${soEnt} só entrega`, accent:(soRet+soEnt)>0 ? 'blue' : undefined },
   ];
   document.getElementById('foraKpis').innerHTML = kpis.map(kpiCard).join('');
 
   const note = document.getElementById('foraNote');
-  if (d.foraSemFilial > 0){
-    note.style.display = 'block';
-    note.innerHTML = `<b>${fmtInt(d.foraSemFilial)}</b> pedidos fora do Abbiamo estão <b>sem filial no Report</b> (Seller Name em branco — em geral Retirada em Loja) e <b>não estão contabilizados</b> na taxa nem nos rankings abaixo.`;
+  note.style.display = 'block';
+  note.innerHTML = 'Lista as filiais que <b>têm a modalidade na VTEX mas não na Abbiamo</b>. Sinal: <b>nenhum pedido</b> = a filial não tem nenhum pedido (retirada nem entrega) na Abbiamo · <b>só retirada</b> = tem retirada mas falta entrega · <b>só entrega</b> = tem entrega mas falta retirada.';
+
+  const el = document.getElementById('foraCoverTable');
+  if (!d.rows.length){
+    el.innerHTML = `<p style="padding:10px;color:var(--ink-muted);font-size:12px">Nenhuma filial com gap no filtro atual.</p>`;
   } else {
-    note.style.display = 'none';
+    let html = `<table class="dtable"><thead><tr><th>Filial</th><th>Coordenador</th><th>Distrital</th><th>Diretoria</th><th>Modalidade na VTEX</th><th>Situação Abbiamo</th></tr></thead><tbody>`;
+    for (const r of d.rows){
+      const vtex = [r.vHasRet?'Retirada':null, r.vHasEnt?'Entrega':null].filter(Boolean).join(' + ');
+      const tagCls = r.level === 'crit' ? 'tag-crit' : 'tag-alert';
+      html += `<tr><td>${escapeHtml(r.filialNome)}</td><td>${escapeHtml(r.coordenador||'—')}</td><td>${escapeHtml(r.distrital||'—')}</td><td>${escapeHtml(r.diretor||'—')}</td><td class="mono">${escapeHtml(vtex)}</td><td><span class="tag ${tagCls}">${escapeHtml(r.sinal)}</span></td></tr>`;
+    }
+    html += `</tbody></table>`;
+    el.innerHTML = html;
   }
 
-  const total = d.foraFiltered.length;
-  const emptyMsg = 'Nenhum pedido fora (com filial) no filtro atual.';
-  const semGestor = '(filial não encontrada na base de gestores)';
-
-  const byFilial = groupForaBy(d.foraFiltered, r => r.filial, '(sem filial)');
-  renderForaRankTable('rankForaFilial', byFilial.slice(0,10), 'Filial', total, emptyMsg);
-  const byCoord = groupForaBy(d.foraFiltered, r => r.coordenador, semGestor);
-  renderForaRankTable('rankForaCoordenador', byCoord.slice(0,10), 'Coordenador', total, emptyMsg);
-  const byDist = groupForaBy(d.foraFiltered, r => r.distrital, semGestor);
-  renderForaRankTable('rankForaDistrital', byDist.slice(0,10), 'Distrital', total, emptyMsg);
-  const byDir = groupForaBy(d.foraFiltered, r => r.diretor, semGestor);
-  renderForaRankTable('rankForaDiretor', byDir.slice(0,10), 'Diretoria', total, emptyMsg);
-
   state._rankFull = state._rankFull || {};
-  state._rankFull['fora-todos'] = d.foraFiltered.map(r => ({
-    Pedido:r.order, 'Loja (Report)':r.sellerRaw, Filial:r.filial,
-    Coordenador:r.coordenador, Distrital:r.distrital, Diretor:r.diretor,
-    'Criação VTEX':fmtDate(r.creation), Plataforma:r.courrier,
+  state._rankFull['fora-cobertura'] = d.rows.map(r => ({
+    Filial:r.filialNome, Cod:r.sellerId, Coordenador:r.coordenador, Distrital:r.distrital, Diretoria:r.diretor,
+    'VTEX Retirada':r.vtexRetN, 'VTEX Entrega':r.vtexEntN,
+    'Abbiamo Retirada':r.abbRetN, 'Abbiamo Entrega':r.abbEntN, Sinal:r.sinal,
   }));
-  const dump = (list, colName) => list.map(x => ({ [colName]:x.label, 'Qtd fora':x.value, '% do fora': fmtPct(total ? x.value/total : 0) }));
-  state._rankFull['fora-filial'] = dump(byFilial, 'Filial');
-  state._rankFull['fora-coordenador'] = dump(byCoord, 'Coordenador');
-  state._rankFull['fora-distrital'] = dump(byDist, 'Distrital');
-  state._rankFull['fora-diretor'] = dump(byDir, 'Diretoria');
 }
 
 function renderStatusLine(){
