@@ -774,6 +774,15 @@ function applyFilters(){
 /* =====================================================================
    METRICS — Retirada
 ===================================================================== */
+// Data de criação para a regra "em aberto +7 dias": prioriza a criação no VTEX;
+// cai para a criação na Abbiamo só se o VTEX não tiver data.
+function openCreationDate(r){ return r.vtexCreation || r.createdAtAbbiamo || null; }
+function isAbertoMais7(r, now){
+  if (r.status === 'SUCCESSFUL') return false;
+  const d = openCreationDate(r);
+  return !!d && (now - d)/86400000 > 7;
+}
+
 function computeRetirada(rows){
   const arr = rows.filter(r => r.orderType==='TAKEOUT');
   const now = new Date();
@@ -781,7 +790,7 @@ function computeRetirada(rows){
   const finalizados = arr.filter(r => r.status==='SUCCESSFUL').length;
   const abertosArr = arr.filter(r => r.status!=='SUCCESSFUL');
   const abertos = abertosArr.length;
-  const abertosMais7 = abertosArr.filter(r => r.createdAtAbbiamo && (now-r.createdAtAbbiamo)/86400000 > 7).length;
+  const abertosMais7 = abertosArr.filter(r => isAbertoMais7(r, now)).length;
   const sepVals = arr.filter(r => r.createdAtAbbiamo && r.vtexCreation).map(r => diffMinutes(r.createdAtAbbiamo, r.vtexCreation));
   const medSep = sepVals.length ? sepVals.reduce((a,b)=>a+b,0)/sepVals.length : null;
   return { total, finalizados, abertos, abertosMais7, taxaFinalizados: total?finalizados/total:null, medSep, arr };
@@ -995,7 +1004,7 @@ function renderRetirada(rows){
   document.getElementById('retiradaKpis').innerHTML = html;
 
   const now = new Date();
-  const abertoRank = rankBySeller(m.arr, items => items.filter(r=>r.status!=='SUCCESSFUL' && r.createdAtAbbiamo && (now-r.createdAtAbbiamo)/86400000>7).length, null)
+  const abertoRank = rankBySeller(m.arr, items => items.filter(r=>isAbertoMais7(r, now)).length, null)
     .filter(g=>g.value>0).sort((a,b)=>b.value-a.value);
   renderRankTable('rankRetiradaAberto', abertoRank.slice(0,10), 'Quantidade', v=>fmtInt(v));
   state._rankFull = state._rankFull || {};
