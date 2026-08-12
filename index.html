@@ -1328,17 +1328,42 @@ function loadGithubSettingsIntoForm(){
   document.getElementById('ghBranch').value = localStorage.getItem(LS_KEYS.ghBranch) || 'main';
   document.getElementById('ghToken').value = localStorage.getItem(LS_KEYS.ghToken) || '';
 }
-async function githubPutFile(owner, repo, branch, token, path, contentObj, message){
-  const api = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
-  let sha = undefined;
-  const getRes = await fetch(`${api}?ref=${encodeURIComponent(branch)}`, { headers:{ Authorization:`token ${token}`, Accept:'application/vnd.github+json' } });
-  if (getRes.status===200){ const j = await getRes.json(); sha = j.sha; }
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(contentObj))));
-  const putRes = await fetch(api, {
-    method:'PUT', headers:{ Authorization:`token ${token}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json' },
-    body: JSON.stringify({ message, content, branch, sha }),
+async function githubApiFetch(url, token, opts){
+  const res = await fetch(url, Object.assign({}, opts, {
+    headers: Object.assign({ Authorization:`token ${token}`, Accept:'application/vnd.github+json' }, opts && opts.headers),
+  }));
+  if (!res.ok){ const t = await res.text(); throw new Error(`HTTP ${res.status} — ${t.slice(0,300)}`); }
+  return res.json();
+}
+
+/* Contents API (PUT) rejects files over ~1MB; orders.json/report.json can pass
+   that easily, so publish via the Git Data API (blob→tree→commit→ref) instead,
+   which has no such limit and lets all files land in a single commit. */
+async function githubPublishFiles(owner, repo, branch, token, files, message){
+  const base = `https://api.github.com/repos/${owner}/${repo}`;
+  const refData = await githubApiFetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, token);
+  const parentCommitSha = refData.object.sha;
+  const parentCommit = await githubApiFetch(`${base}/git/commits/${parentCommitSha}`, token);
+  const baseTreeSha = parentCommit.tree.sha;
+
+  const treeEntries = [];
+  for (const f of files){
+    const contentStr = JSON.stringify(f.contentObj);
+    const b64 = btoa(unescape(encodeURIComponent(contentStr)));
+    const blob = await githubApiFetch(`${base}/git/blobs`, token, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ content:b64, encoding:'base64' }),
+    });
+    treeEntries.push({ path:f.path, mode:'100644', type:'blob', sha:blob.sha });
+  }
+  const newTree = await githubApiFetch(`${base}/git/trees`, token, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ base_tree:baseTreeSha, tree:treeEntries }),
   });
-  if (!putRes.ok){ const t = await putRes.text(); throw new Error(`${path}: HTTP ${putRes.status} — ${t.slice(0,200)}`); }
+  const newCommit = await githubApiFetch(`${base}/git/commits`, token, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message, tree:newTree.sha, parents:[parentCommitSha] }),
+  });
+  await githubApiFetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, token, {
+    method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sha:newCommit.sha }),
+  });
 }
 function showToast(message, type){
   const el = document.createElement('div');
@@ -1358,12 +1383,12 @@ document.getElementById('btnPublishGithub').onclick = async () => {
   localStorage.setItem(LS_KEYS.ghRepo, repoFull); localStorage.setItem(LS_KEYS.ghBranch, branch); localStorage.setItem(LS_KEYS.ghToken, token);
   const btn = document.getElementById('btnPublishGithub'); btn.disabled = true;
   try{
-    log('Publicando data/orders.json…');
-    await githubPutFile(owner, repo, branch, token, 'data/orders.json', state.rawOrders, 'Atualiza orders.json');
-    log('Publicando data/report.json…');
-    await githubPutFile(owner, repo, branch, token, 'data/report.json', state.rawReport, 'Atualiza report.json');
-    log('Publicando data/gestores.json…');
-    await githubPutFile(owner, repo, branch, token, 'data/gestores.json', state.gestores, 'Atualiza gestores.json');
+    log(`Publicando ${fmtInt(state.rawOrders.length)} pedidos, ${fmtInt(state.rawReport.length)} registros VTEX e ${fmtInt(state.gestores.length)} filiais em um único commit…`);
+    await githubPublishFiles(owner, repo, branch, token, [
+      { path:'data/orders.json', contentObj: state.rawOrders },
+      { path:'data/report.json', contentObj: state.rawReport },
+      { path:'data/gestores.json', contentObj: state.gestores },
+    ], 'Atualiza dados do painel (orders, report, gestores)');
     log('Publicado com sucesso no GitHub.');
     dlgUpdate.close();
     showToast('Publicado no GitHub — já está visível para todo mundo.');
