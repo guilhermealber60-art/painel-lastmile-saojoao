@@ -1345,11 +1345,18 @@ function downloadJson(filename, data){
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
 }
 
-async function githubApiFetch(url, token, opts){
-  const res = await fetch(url, Object.assign({}, opts, {
-    headers: Object.assign({ Authorization:`Bearer ${token}`, Accept:'application/vnd.github+json' }, opts && opts.headers),
-  }));
-  if (!res.ok){ const t = await res.text(); throw new Error(`HTTP ${res.status} — ${t.slice(0,300)}`); }
+async function githubApiFetch(url, token, opts, step){
+  const label = step || (opts && opts.method) || 'GET';
+  let res;
+  try{
+    res = await fetch(url, Object.assign({}, opts, {
+      headers: Object.assign({ Authorization:`Bearer ${token}`, Accept:'application/vnd.github+json' }, opts && opts.headers),
+    }));
+  } catch(netErr){
+    console.error(`[publicar] rede falhou em "${label}" (${url}):`, netErr);
+    throw new Error(`Rede falhou em "${label}" — ${netErr.message}. Provável payload grande demais ou bloqueio de rede/extensão.`);
+  }
+  if (!res.ok){ const t = await res.text(); console.error(`[publicar] HTTP ${res.status} em "${label}":`, t.slice(0,300)); throw new Error(`HTTP ${res.status} em "${label}" — ${t.slice(0,200)}`); }
   return res.json();
 }
 
@@ -1358,29 +1365,35 @@ async function githubApiFetch(url, token, opts){
    which has no such limit and lets all files land in a single commit. */
 async function githubPublishFiles(owner, repo, branch, token, files, message){
   const base = `https://api.github.com/repos/${owner}/${repo}`;
-  const refData = await githubApiFetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, token);
+  console.log('[publicar] passo 1/5: lendo ref da branch…');
+  const refData = await githubApiFetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, token, null, 'GET ref');
   const parentCommitSha = refData.object.sha;
-  const parentCommit = await githubApiFetch(`${base}/git/commits/${parentCommitSha}`, token);
+  console.log('[publicar] passo 2/5: lendo commit pai…');
+  const parentCommit = await githubApiFetch(`${base}/git/commits/${parentCommitSha}`, token, null, 'GET commit pai');
   const baseTreeSha = parentCommit.tree.sha;
 
   const treeEntries = [];
   for (const f of files){
     const contentStr = JSON.stringify(f.contentObj);
     const b64 = btoa(unescape(encodeURIComponent(contentStr)));
+    console.log(`[publicar] passo 3/5: enviando blob ${f.path} — ${(b64.length/1048576).toFixed(1)} MB (base64)…`);
     const blob = await githubApiFetch(`${base}/git/blobs`, token, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ content:b64, encoding:'base64' }),
-    });
+    }, `POST blob ${f.path}`);
     treeEntries.push({ path:f.path, mode:'100644', type:'blob', sha:blob.sha });
   }
+  console.log('[publicar] passo 4/5: criando tree + commit…');
   const newTree = await githubApiFetch(`${base}/git/trees`, token, {
     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ base_tree:baseTreeSha, tree:treeEntries }),
-  });
+  }, 'POST tree');
   const newCommit = await githubApiFetch(`${base}/git/commits`, token, {
     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message, tree:newTree.sha, parents:[parentCommitSha] }),
-  });
+  }, 'POST commit');
+  console.log('[publicar] passo 5/5: movendo a branch para o novo commit…');
   await githubApiFetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, token, {
     method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sha:newCommit.sha }),
-  });
+  }, 'PATCH ref');
+  console.log('[publicar] concluído.');
 }
 function showToast(message, type){
   const el = document.createElement('div');
@@ -1441,6 +1454,8 @@ async function publishSnapshot(){
   const prevLabel = btn.textContent;
   btn.textContent = 'Publicando…';
   try{
+    const mb = arr => (JSON.stringify(arr).length/1048576).toFixed(1);
+    console.log(`[publicar] tamanhos — orders: ${mb(state.rawOrders)} MB (${state.rawOrders.length} regs) · report: ${mb(state.rawReport)} MB (${state.rawReport.length} regs) · gestores: ${mb(state.gestores)} MB`);
     await githubPublishFiles(GH_OWNER, GH_REPO, GH_BRANCH, token, [
       { path:'data/orders.json', contentObj: state.rawOrders },
       { path:'data/report.json', contentObj: state.rawReport },
