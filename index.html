@@ -278,6 +278,8 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
     </div>
   </div>
   <button class="topbtn" id="btnOpenUpdate">Atualizar dados</button>
+  <button class="topbtn" id="btnPublish">Publicar (snapshot)</button>
+  <button class="themebtn" id="btnConfigPublish" title="Configurar publicação direta no GitHub">⚙️</button>
   <button class="themebtn" id="btnTheme" title="Alternar tema claro/escuro">🌙</button>
 </div>
 
@@ -437,9 +439,9 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
   <div class="dlg-head"><h3>Atualizar dados</h3><button data-close>×</button></div>
   <div class="dlg-body">
     <p style="font-size:11.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6">
-      Dois passos separados: <b style="color:var(--ink-2)">1) Processar arquivos</b> lê os CSVs e já atualiza o painel
-      <b style="color:var(--ink-2)">só neste navegador</b>. <b style="color:var(--ink-2)">2) Publicar no GitHub</b> (mais abaixo)
-      é o que efetivamente torna os dados vis&iacute;veis para qualquer pessoa que abrir o link — sem isso, ningu&eacute;m mais v&ecirc; a atualiza&ccedil;&atilde;o.
+      Dois passos separados: <b style="color:var(--ink-2)">1) Processar arquivos</b> (aqui) lê os CSVs e já atualiza o painel
+      <b style="color:var(--ink-2)">só neste navegador</b>. <b style="color:var(--ink-2)">2) Publicar</b> — feche este diálogo e clique no botão
+      <b style="color:var(--ink-2)">Publicar</b> lá em cima. É isso que torna os dados vis&iacute;veis para qualquer pessoa que abrir o link.
     </p>
     <div class="field-row">
       <label>Orders (Abbiamo) — CSV ;</label>
@@ -463,18 +465,12 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
     </div>
 
     <div style="margin-top:16px;padding:12px;border:1px solid var(--blue); border-radius:10px; background:var(--blue-soft)">
-      <div style="font-weight:800; font-size:12.5px; color:var(--heading); margin-bottom:8px">Passo 2 — Publicar para todo mundo</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-ghost" id="btnDownloadJson">Baixar JSON (data/)</button>
+      <div style="font-weight:800; font-size:12.5px; color:var(--heading); margin-bottom:6px">Passo 2 — Publicar para todo mundo</div>
+      <div style="font-size:11.5px;color:var(--ink-2);line-height:1.6">
+        Depois de processar, feche este diálogo e clique em <b>Publicar</b> na barra de cima.
+        Se você já configurou o token (botão ⚙️), a publicação vai direto pro GitHub; se não, o botão baixa os JSON
+        para você subir na pasta <code>data/</code> do repositório.
       </div>
-      <details class="settings" style="margin-top:12px">
-        <summary>Publicar direto no GitHub</summary>
-        <div class="field-row" style="margin-top:10px"><label>owner/repo</label><input type="text" id="ghRepo" placeholder="guilhermealber60-art/painel-lastmile-saojoao"></div>
-        <div class="field-row"><label>branch</label><input type="text" id="ghBranch" value="main"></div>
-        <div class="field-row"><label>token (Personal Access Token, escopo repo)</label><input type="password" id="ghToken" placeholder="ghp_..."></div>
-        <div class="hint">O token fica salvo apenas no localStorage deste navegador — nunca é enviado a nenhum lugar além da API do GitHub.</div>
-        <button class="btn btn-primary" style="margin-top:8px" id="btnPublishGithub">Publicar no GitHub</button>
-      </details>
     </div>
 
     <details class="settings">
@@ -485,6 +481,32 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
     </details>
   </div>
   <div class="dlg-foot"><button class="btn btn-ghost" data-close>Fechar</button></div>
+</dialog>
+
+<dialog id="dlgConfig">
+  <div class="dlg-head"><h3>Publicar direto no GitHub</h3><button data-close>×</button></div>
+  <div class="dlg-body">
+    <p style="font-size:11.5px;color:var(--ink-2);margin:0 0 12px;line-height:1.6">
+      Com um token configurado, o botão <b>Publicar</b> envia <code>data/orders.json</code>, <code>data/report.json</code> e
+      <code>data/gestores.json</code> direto para o repositório <code>guilhermealber60-art/painel-lastmile-saojoao</code> —
+      sem baixar arquivo, sem git, sem terminal.
+    </p>
+    <div style="padding:10px 12px;border:1px solid var(--red);border-radius:10px;background:var(--red-soft);font-size:11px;color:var(--ink-2);line-height:1.6;margin-bottom:14px">
+      <b>Segurança:</b> o token fica salvo só neste navegador (não é enviado a mim nem a ninguém além do GitHub).
+      Crie um <b>fine-grained token</b> em <b>github.com/settings/tokens</b>, restrito ao repositório
+      <b>painel-lastmile-saojoao</b>, com permissão apenas de <b>Contents: Read and write</b>, e defina uma expiração.
+      Se trocar de computador ou navegador, precisa configurar de novo.
+    </div>
+    <div class="field-row">
+      <label>Token de acesso (GitHub)</label>
+      <input type="password" id="cfgToken" placeholder="github_pat_…">
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn btn-danger" id="btnRemoveToken" style="margin-right:auto">Remover token deste navegador</button>
+    <button class="btn btn-ghost" data-close>Fechar</button>
+    <button class="btn btn-primary" id="btnSaveToken">Salvar</button>
+  </div>
 </dialog>
 
 <script>
@@ -514,8 +536,13 @@ const PALETTE = {navy:'#1E2761', blue:'#1476C4', green:'#1E9E4A', red:'#E30D17',
 
 const LS_KEYS = {
   pendingOrders:'lm_pending_orders', pendingReport:'lm_pending_report', pendingGestores:'lm_pending_gestores',
-  ghRepo:'lm_gh_repo', ghBranch:'lm_gh_branch', ghToken:'lm_gh_token', theme:'lm_theme',
+  ghToken:'lm_gh_token', theme:'lm_theme',
 };
+
+/* Repositório de publicação fixo — só o token é configurável pelo usuário. */
+const GH_OWNER = 'guilhermealber60-art';
+const GH_REPO  = 'painel-lastmile-saojoao';
+const GH_BRANCH = 'main';
 
 /* =====================================================================
    THEME (claro/escuro)
@@ -1204,7 +1231,7 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.exportmenu')
    DATA UPDATE / ACCUMULATE / PUBLISH FLOW
 ===================================================================== */
 const dlgUpdate = document.getElementById('dlgUpdate');
-document.getElementById('btnOpenUpdate').onclick = () => { loadGithubSettingsIntoForm(); dlgUpdate.showModal(); };
+document.getElementById('btnOpenUpdate').onclick = () => dlgUpdate.showModal();
 dlgUpdate.querySelectorAll('[data-close]').forEach(b => b.onclick = () => dlgUpdate.close());
 
 function log(msg){
@@ -1312,25 +1339,15 @@ document.getElementById('btnWipeAccum').onclick = () => {
   log('Acumulado apagado.');
 };
 
-document.getElementById('btnDownloadJson').onclick = () => {
-  downloadJson('orders.json', state.rawOrders);
-  downloadJson('report.json', state.rawReport);
-  downloadJson('gestores.json', state.gestores);
-};
 function downloadJson(filename, data){
   const blob = new Blob([JSON.stringify(data)], { type:'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
 }
 
-function loadGithubSettingsIntoForm(){
-  document.getElementById('ghRepo').value = localStorage.getItem(LS_KEYS.ghRepo) || '';
-  document.getElementById('ghBranch').value = localStorage.getItem(LS_KEYS.ghBranch) || 'main';
-  document.getElementById('ghToken').value = localStorage.getItem(LS_KEYS.ghToken) || '';
-}
 async function githubApiFetch(url, token, opts){
   const res = await fetch(url, Object.assign({}, opts, {
-    headers: Object.assign({ Authorization:`token ${token}`, Accept:'application/vnd.github+json' }, opts && opts.headers),
+    headers: Object.assign({ Authorization:`Bearer ${token}`, Accept:'application/vnd.github+json' }, opts && opts.headers),
   }));
   if (!res.ok){ const t = await res.text(); throw new Error(`HTTP ${res.status} — ${t.slice(0,300)}`); }
   return res.json();
@@ -1374,29 +1391,72 @@ function showToast(message, type){
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 5000);
 }
 
-document.getElementById('btnPublishGithub').onclick = async () => {
-  const repoFull = document.getElementById('ghRepo').value.trim();
-  const branch = document.getElementById('ghBranch').value.trim() || 'main';
-  const token = document.getElementById('ghToken').value.trim();
-  const [owner, repo] = repoFull.split('/');
-  if (!owner || !repo || !token){ log('Preencha owner/repo e token.'); return; }
-  localStorage.setItem(LS_KEYS.ghRepo, repoFull); localStorage.setItem(LS_KEYS.ghBranch, branch); localStorage.setItem(LS_KEYS.ghToken, token);
-  const btn = document.getElementById('btnPublishGithub'); btn.disabled = true;
+/* ---------- Publicar (snapshot local OU direto no GitHub) ---------- */
+const ghToken = () => localStorage.getItem(LS_KEYS.ghToken) || '';
+
+function updatePublishBtn(){
+  const b = document.getElementById('btnPublish');
+  if (b) b.textContent = ghToken() ? 'Publicar no GitHub' : 'Publicar (snapshot)';
+}
+
+const dlgConfig = document.getElementById('dlgConfig');
+dlgConfig.querySelectorAll('[data-close]').forEach(b => b.onclick = () => dlgConfig.close());
+document.getElementById('btnConfigPublish').onclick = () => {
+  document.getElementById('cfgToken').value = ghToken();
+  dlgConfig.showModal();
+};
+document.getElementById('btnSaveToken').onclick = () => {
+  const v = document.getElementById('cfgToken').value.trim();
+  if (!v){ showToast('Cole um token válido.', 'error'); return; }
+  localStorage.setItem(LS_KEYS.ghToken, v);
+  updatePublishBtn();
+  dlgConfig.close();
+  showToast('Token salvo neste navegador. Publicar agora vai direto pro GitHub.');
+};
+document.getElementById('btnRemoveToken').onclick = () => {
+  if (!ghToken()){ showToast('Nenhum token salvo.', 'error'); return; }
+  if (!confirm('Remover o token salvo neste navegador? Você volta a precisar baixar e subir os arquivos manualmente. Isso não revoga o token no GitHub — para revogar de vez, apague-o em github.com/settings/tokens.')) return;
+  localStorage.removeItem(LS_KEYS.ghToken);
+  document.getElementById('cfgToken').value = '';
+  updatePublishBtn();
+  dlgConfig.close();
+  showToast('Token removido deste navegador.');
+};
+
+async function publishSnapshot(){
+  if (!state.rawOrders.length && !state.rawReport.length){
+    showToast('Carregue os dados primeiro em "Atualizar dados".', 'error');
+    return;
+  }
+  const token = ghToken();
+  if (!token){
+    downloadJson('orders.json', state.rawOrders);
+    downloadJson('report.json', state.rawReport);
+    downloadJson('gestores.json', state.gestores);
+    showToast('JSON baixados — suba na pasta data/ do repositório e faça commit. Dica: configure o token (⚙️) para publicar direto.');
+    return;
+  }
+  const btn = document.getElementById('btnPublish');
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = 'Publicando…';
   try{
-    log(`Publicando ${fmtInt(state.rawOrders.length)} pedidos, ${fmtInt(state.rawReport.length)} registros VTEX e ${fmtInt(state.gestores.length)} filiais em um único commit…`);
-    await githubPublishFiles(owner, repo, branch, token, [
+    await githubPublishFiles(GH_OWNER, GH_REPO, GH_BRANCH, token, [
       { path:'data/orders.json', contentObj: state.rawOrders },
       { path:'data/report.json', contentObj: state.rawReport },
       { path:'data/gestores.json', contentObj: state.gestores },
     ], 'Atualiza dados do painel (orders, report, gestores)');
-    log('Publicado com sucesso no GitHub.');
-    dlgUpdate.close();
-    showToast('Publicado no GitHub — já está visível para todo mundo.');
+    showToast('Publicado no GitHub! O site atualiza para todos em alguns minutos.');
   } catch(err){
-    log('Erro ao publicar: ' + err.message);
-    showToast('Erro ao publicar no GitHub: ' + err.message, 'error');
-  } finally { btn.disabled = false; }
-};
+    const msg = /HTTP 401/.test(err.message) ? 'Token inválido ou expirado — abra ⚙️ e cole um token novo.' : err.message;
+    showToast('Falha ao publicar: ' + msg, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+    updatePublishBtn();
+  }
+}
+document.getElementById('btnPublish').onclick = publishSnapshot;
 
 /* =====================================================================
    BOOT
@@ -1405,6 +1465,7 @@ async function fetchJsonSafe(path){
   try{ const res = await fetch(path, { cache:'no-store' }); if (!res.ok) return null; return await res.json(); } catch(e){ return null; }
 }
 async function boot(){
+  updatePublishBtn();
   restorePendingFromLocalStorage();
   const [pubOrders, pubReport, pubGestores] = await Promise.all([
     fetchJsonSafe('data/orders.json'), fetchJsonSafe('data/report.json'), fetchJsonSafe('data/gestores.json'),
