@@ -1143,7 +1143,9 @@ function sellerNameToLabel(sellerName){
 
 function computeFora(){
   const f = state.filters;
-  const abbiamo = new Set(state.rawOrders.map(o => o.on));
+  // Só casa contra pedidos Abbiamo de origem válida (VTEX/API) — HERMES-FORM e
+  // HERMES-DUPLICATE são ignorados em todos os indicadores, igual ao buildJoined.
+  const abbiamo = new Set(state.rawOrders.filter(o => VALID_ORIGINS.has(o.oco)).map(o => o.on));
   const gByCod = new Map(state.gestores.map(g => [normCod(g.cod), g]));
   let totalVtex = 0;
   const foraAll = [];
