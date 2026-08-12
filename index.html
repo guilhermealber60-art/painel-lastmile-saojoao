@@ -1505,7 +1505,12 @@ function persistPendingToLocalStorage(){
     localStorage.setItem(LS_KEYS.pendingOrders, JSON.stringify(state.rawOrders));
     localStorage.setItem(LS_KEYS.pendingReport, JSON.stringify(state.rawReport));
     localStorage.setItem(LS_KEYS.pendingGestores, JSON.stringify(state.gestores));
-  } catch(e){ log('Aviso: não foi possível salvar cache local (' + e.message + ').'); }
+  } catch(e){
+    // Base grande não cabe no localStorage (~5 MB). Em vez de deixar um snapshot
+    // antigo/parcial que sobrescreveria o publicado, apaga o rascunho local.
+    clearPendingLocalStorage();
+    log('Aviso: base grande demais para o cache local — os dados vivem no GitHub após publicar (não é problema).');
+  }
 }
 function restorePendingFromLocalStorage(){
   try{
@@ -1679,6 +1684,7 @@ async function publishSnapshot(){
       { path:'data/report.json.gz', contentB64: bytesToBase64(reportGz) },
       { path:'data/gestores.json', contentObj: state.gestores },
     ], 'Atualiza dados do painel (orders, report, gestores)');
+    clearPendingLocalStorage(); // publicado é a fonte de verdade; não deixa rascunho velho
     showToast('Publicado no GitHub! O site atualiza para todos em alguns minutos.');
   } catch(err){
     const msg = /HTTP 401/.test(err.message) ? 'Token inválido ou expirado — abra ⚙️ e cole um token novo.' : err.message;
@@ -1697,22 +1703,39 @@ document.getElementById('btnPublish').onclick = publishSnapshot;
 async function fetchJsonSafe(path){
   try{ const res = await fetch(path, { cache:'no-store' }); if (!res.ok) return null; return await res.json(); } catch(e){ return null; }
 }
-/* Prefere o .gz (formato novo); cai pro .json cru se ainda não houver .gz publicado. */
+/* Prefere o .gz (formato novo); cai pro .json cru se ainda não houver .gz publicado.
+   Cache-busting (?t=) garante que o navegador e o CDN do GitHub Pages nunca sirvam
+   uma versão antiga do arquivo. */
 async function fetchDataFile(basePath){
-  const gz = await fetchGzJson(basePath + '.gz');
+  const bust = '?t=' + Date.now();
+  const gz = await fetchGzJson(basePath + '.gz' + bust);
   if (gz != null) return gz;
-  return fetchJsonSafe(basePath);
+  return fetchJsonSafe(basePath + bust);
+}
+function clearPendingLocalStorage(){
+  try{
+    localStorage.removeItem(LS_KEYS.pendingOrders);
+    localStorage.removeItem(LS_KEYS.pendingReport);
+    localStorage.removeItem(LS_KEYS.pendingGestores);
+  } catch(e){}
 }
 async function boot(){
   updatePublishBtn();
-  restorePendingFromLocalStorage();
   const [pubOrders, pubReport, pubGestores] = await Promise.all([
     fetchDataFile('data/orders.json'), fetchDataFile('data/report.json'), fetchDataFile('data/gestores.json'),
   ]);
-  if (pubOrders && !state.rawOrders.length) state.rawOrders = pubOrders;
-  if (pubReport && !state.rawReport.length) state.rawReport = pubReport;
-  if (pubGestores && !state.gestores.length) state.gestores = pubGestores;
-  if (!state.rawOrders.length && !state.rawReport.length && !pubOrders){
+  // Os dados PUBLICADOS são a fonte de verdade e têm prioridade sobre o localStorage.
+  // (O localStorage não aguarda 91 MB — o cache local ficava com um snapshot antigo
+  //  e menor que sobrescrevia o publicado, fazendo o painel abrir desatualizado.)
+  if (pubOrders) state.rawOrders = pubOrders;
+  if (pubReport) state.rawReport = pubReport;
+  if (pubGestores) state.gestores = pubGestores;
+  if (pubOrders || pubReport){
+    clearPendingLocalStorage(); // limpa qualquer rascunho velho que sobrou
+  } else {
+    restorePendingFromLocalStorage(); // sem nada publicado: usa o rascunho local, se houver
+  }
+  if (!state.rawOrders.length && !state.rawReport.length){
     document.getElementById('statusLine').textContent = 'Nenhum dado publicado encontrado — use "Atualizar dados" para importar os arquivos.';
   }
   buildJoined();
