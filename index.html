@@ -1133,6 +1133,7 @@ function computeForaCobertura(){
     if (!map.has(key)){
       const g = gByCod.get(key) || null;
       map.set(key, {
+        inBase: !!g,
         sellerId: g ? String(g.cod).trim() : key,
         filial: g ? g.filial : '', vtexLabel: '',
         coordenador: g ? g.coordenador : '', distrital: g ? g.distrital : '',
@@ -1155,7 +1156,9 @@ function computeForaCobertura(){
     if (!e.vtexLabel) e.vtexLabel = sellerNameToLabel(sk);
     if (/retirada em loja/i.test(rep.courrier || '')) e.vtexRetN++; else e.vtexEntN++;
   }
-  const totalFiliaisVtex = map.size;
+  // Só considera filiais que existem na base de gestores.
+  let totalFiliaisVtex = 0;
+  for (const e of map.values()) if (e.inBase) totalFiliaisVtex++;
   // Lado Abbiamo (só origens válidas; só filiais que já aparecem na VTEX)
   for (const o of state.rawOrders){
     if (!VALID_ORIGINS.has(o.oco)) continue;
@@ -1170,6 +1173,7 @@ function computeForaCobertura(){
   // Classifica gaps
   const rows = [];
   for (const e of map.values()){
+    if (!e.inBase) continue; // filial fora da base de gestores não entra
     const vHasRet = e.vtexRetN > 0, vHasEnt = e.vtexEntN > 0;
     const aHasRet = e.abbRetN > 0, aHasEnt = e.abbEntN > 0;
     const gap = (vHasRet && !aHasRet) || (vHasEnt && !aHasEnt);
