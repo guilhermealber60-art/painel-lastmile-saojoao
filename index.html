@@ -1344,6 +1344,32 @@ function downloadJson(filename, data){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
 }
+function downloadBytes(filename, bytes, mime){
+  const blob = new Blob([bytes], { type: mime || 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+}
+
+/* ---------- gzip helpers (o volume de Orders/Report estoura o limite de blob
+   da API do GitHub — 422 "input too large"; comprimimos antes de subir) ---------- */
+async function gzipStringToBytes(str){
+  const stream = new Blob([str]).stream().pipeThrough(new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+function bytesToBase64(bytes){
+  let bin = ''; const CH = 0x8000;
+  for (let i=0; i<bytes.length; i+=CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i+CH));
+  return btoa(bin);
+}
+async function fetchGzJson(path){
+  try{
+    const res = await fetch(path, { cache:'no-store' });
+    if (!res.ok) return null;
+    const ds = res.body.pipeThrough(new DecompressionStream('gzip'));
+    const text = await new Response(ds).text();
+    return JSON.parse(text);
+  } catch(e){ return null; }
+}
 
 async function githubApiFetch(url, token, opts, step){
   const label = step || (opts && opts.method) || 'GET';
@@ -1374,8 +1400,7 @@ async function githubPublishFiles(owner, repo, branch, token, files, message){
 
   const treeEntries = [];
   for (const f of files){
-    const contentStr = JSON.stringify(f.contentObj);
-    const b64 = btoa(unescape(encodeURIComponent(contentStr)));
+    const b64 = f.contentB64 != null ? f.contentB64 : btoa(unescape(encodeURIComponent(JSON.stringify(f.contentObj))));
     console.log(`[publicar] passo 3/5: enviando blob ${f.path} — ${(b64.length/1048576).toFixed(1)} MB (base64)…`);
     const blob = await githubApiFetch(`${base}/git/blobs`, token, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ content:b64, encoding:'base64' }),
@@ -1442,23 +1467,29 @@ async function publishSnapshot(){
     return;
   }
   const token = ghToken();
-  if (!token){
-    downloadJson('orders.json', state.rawOrders);
-    downloadJson('report.json', state.rawReport);
-    downloadJson('gestores.json', state.gestores);
-    showToast('JSON baixados — suba na pasta data/ do repositório e faça commit. Dica: configure o token (⚙️) para publicar direto.');
-    return;
-  }
   const btn = document.getElementById('btnPublish');
   btn.disabled = true;
   const prevLabel = btn.textContent;
-  btn.textContent = 'Publicando…';
+  btn.textContent = token ? 'Publicando…' : 'Compactando…';
   try{
     const mb = arr => (JSON.stringify(arr).length/1048576).toFixed(1);
-    console.log(`[publicar] tamanhos — orders: ${mb(state.rawOrders)} MB (${state.rawOrders.length} regs) · report: ${mb(state.rawReport)} MB (${state.rawReport.length} regs) · gestores: ${mb(state.gestores)} MB`);
+    console.log(`[publicar] tamanhos crus — orders: ${mb(state.rawOrders)} MB (${state.rawOrders.length} regs) · report: ${mb(state.rawReport)} MB (${state.rawReport.length} regs) · gestores: ${mb(state.gestores)} MB`);
+    console.log('[publicar] compactando (gzip)…');
+    const ordersGz = await gzipStringToBytes(JSON.stringify(state.rawOrders));
+    const reportGz = await gzipStringToBytes(JSON.stringify(state.rawReport));
+    console.log(`[publicar] gzip — orders: ${(ordersGz.length/1048576).toFixed(1)} MB · report: ${(reportGz.length/1048576).toFixed(1)} MB`);
+
+    if (!token){
+      downloadBytes('orders.json.gz', ordersGz, 'application/gzip');
+      downloadBytes('report.json.gz', reportGz, 'application/gzip');
+      downloadJson('gestores.json', state.gestores);
+      showToast('Arquivos .gz baixados — suba em data/ do repositório. Dica: configure o token (⚙️) para publicar direto.');
+      return;
+    }
+
     await githubPublishFiles(GH_OWNER, GH_REPO, GH_BRANCH, token, [
-      { path:'data/orders.json', contentObj: state.rawOrders },
-      { path:'data/report.json', contentObj: state.rawReport },
+      { path:'data/orders.json.gz', contentB64: bytesToBase64(ordersGz) },
+      { path:'data/report.json.gz', contentB64: bytesToBase64(reportGz) },
       { path:'data/gestores.json', contentObj: state.gestores },
     ], 'Atualiza dados do painel (orders, report, gestores)');
     showToast('Publicado no GitHub! O site atualiza para todos em alguns minutos.');
@@ -1479,11 +1510,17 @@ document.getElementById('btnPublish').onclick = publishSnapshot;
 async function fetchJsonSafe(path){
   try{ const res = await fetch(path, { cache:'no-store' }); if (!res.ok) return null; return await res.json(); } catch(e){ return null; }
 }
+/* Prefere o .gz (formato novo); cai pro .json cru se ainda não houver .gz publicado. */
+async function fetchDataFile(basePath){
+  const gz = await fetchGzJson(basePath + '.gz');
+  if (gz != null) return gz;
+  return fetchJsonSafe(basePath);
+}
 async function boot(){
   updatePublishBtn();
   restorePendingFromLocalStorage();
   const [pubOrders, pubReport, pubGestores] = await Promise.all([
-    fetchJsonSafe('data/orders.json'), fetchJsonSafe('data/report.json'), fetchJsonSafe('data/gestores.json'),
+    fetchDataFile('data/orders.json'), fetchDataFile('data/report.json'), fetchDataFile('data/gestores.json'),
   ]);
   if (pubOrders && !state.rawOrders.length) state.rawOrders = pubOrders;
   if (pubReport && !state.rawReport.length) state.rawReport = pubReport;
