@@ -429,6 +429,11 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 <dialog id="dlgUpdate">
   <div class="dlg-head"><h3>Atualizar dados</h3><button data-close>×</button></div>
   <div class="dlg-body">
+    <p style="font-size:11.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6">
+      Dois passos separados: <b style="color:var(--ink-2)">1) Processar arquivos</b> lê os CSVs e já atualiza o painel
+      <b style="color:var(--ink-2)">só neste navegador</b>. <b style="color:var(--ink-2)">2) Publicar no GitHub</b> (mais abaixo)
+      é o que efetivamente torna os dados vis&iacute;veis para qualquer pessoa que abrir o link — sem isso, ningu&eacute;m mais v&ecirc; a atualiza&ccedil;&atilde;o.
+    </p>
     <div class="field-row">
       <label>Orders (Abbiamo) — CSV ;</label>
       <input type="file" id="fileOrders" accept=".csv">
@@ -441,21 +446,19 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <label>base_Gestores — .xlsx (opcional, só quando muda)</label>
       <input type="file" id="fileGestores" accept=".xlsx">
     </div>
-    <button class="btn btn-primary" id="btnProcessFiles">Processar arquivos</button>
+    <button class="btn btn-primary" id="btnProcessFiles">Processar e aplicar ao painel</button>
     <div class="log-box" id="updateLog" style="display:none"></div>
 
     <div id="pendingSummary" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-      <div class="summary-line">Pedidos acumulados prontos para aplicar: <b id="pendOrdersCount">0</b></div>
+      <div class="summary-line">Pedidos acumulados neste navegador: <b id="pendOrdersCount">0</b></div>
       <div class="summary-line">Pedidos VTEX (dedup por Order) acumulados: <b id="pendReportCount">0</b></div>
       <div class="summary-line">Filiais na base de gestores: <b id="pendGestoresCount">0</b></div>
-      <button class="btn btn-primary" id="btnApplyPending">Aplicar aos dados do painel</button>
     </div>
 
-    <details class="settings">
-      <summary>Publicar / apagar acumulado</summary>
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+    <div style="margin-top:16px;padding:12px;border:1px solid var(--blue); border-radius:10px; background:var(--blue-soft)">
+      <div style="font-weight:800; font-size:12.5px; color:var(--heading); margin-bottom:8px">Passo 2 — Publicar para todo mundo</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-ghost" id="btnDownloadJson">Baixar JSON (data/)</button>
-        <button class="btn btn-danger" id="btnWipeAccum">Apagar acumulado (virada de mês)</button>
       </div>
       <details class="settings" style="margin-top:12px">
         <summary>Publicar direto no GitHub</summary>
@@ -465,6 +468,13 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
         <div class="hint">O token fica salvo apenas no localStorage deste navegador — nunca é enviado a nenhum lugar além da API do GitHub.</div>
         <button class="btn btn-primary" style="margin-top:8px" id="btnPublishGithub">Publicar no GitHub</button>
       </details>
+    </div>
+
+    <details class="settings">
+      <summary>Apagar acumulado (virada de mês)</summary>
+      <div style="margin-top:10px">
+        <button class="btn btn-danger" id="btnWipeAccum">Apagar acumulado</button>
+      </div>
     </details>
   </div>
   <div class="dlg-foot"><button class="btn btn-ghost" data-close>Fechar</button></div>
@@ -610,7 +620,6 @@ const state = {
   retiradaVisible: true,
   entregaVisible: true,
   entregaModalTab: 'Todas',
-  pending: { orders:[], report:[], gestoresRaw:null },
 };
 
 /* =====================================================================
@@ -1235,46 +1244,39 @@ document.getElementById('btnProcessFiles').onclick = async () => {
       log(`Lendo ${fOrders.name}…`);
       const rows = await parseCsvFile(fOrders, ';');
       const picked = rows.map(pickOrderFields).filter(r=>r.on);
-      state.pending.orders = mergeByKey(state.pending.orders, picked, r=>r.on);
-      log(`Orders: ${rows.length} linhas lidas · ${picked.length} válidas nesta importação.`);
+      state.rawOrders = mergeByKey(state.rawOrders, picked, r=>r.on);
+      log(`Orders: ${rows.length} linhas lidas · ${picked.length} válidas nesta importação · ${state.rawOrders.length} acumulados no total.`);
     }
     if (fReport){
       log(`Lendo ${fReport.name}… (arquivo grande, pode levar alguns segundos)`);
       const rows = await parseCsvFile(fReport, ';');
       const picked = dedupeReportByOrder(rows.map(pickReportFields).filter(r=>r.order));
-      state.pending.report = mergeByKey(state.pending.report, picked, r=>r.order);
-      log(`Report: ${rows.length} linhas (SKU) lidas · ${picked.length} pedidos distintos nesta importação.`);
+      state.rawReport = mergeByKey(state.rawReport, picked, r=>r.order);
+      log(`Report: ${rows.length} linhas (SKU) lidas · ${picked.length} pedidos distintos nesta importação · ${state.rawReport.length} acumulados no total.`);
     }
     if (fGestores){
       log(`Lendo ${fGestores.name}…`);
       const rows = await parseXlsxFile(fGestores);
-      state.pending.gestoresRaw = rows.filter(r=>r['Loja']!=null && String(r['Loja']).trim()!=='').map(r => ({
+      state.gestores = rows.filter(r=>r['Loja']!=null && String(r['Loja']).trim()!=='').map(r => ({
         cod:String(r['Loja']).trim(), filial:(r['Filial']||'').toString().trim(), diretor:(r['Diretor']||'').toString().trim(),
         distrital:(r['Distrital']||'').toString().trim(), coordenador:(r['Coordenador']||'').toString().trim(),
         uf:(r['UF']||'').toString().trim(), regional:(r['Região']||'').toString().trim(),
       }));
-      log(`Gestores: ${state.pending.gestoresRaw.length} filiais lidas.`);
+      log(`Gestores: ${state.gestores.length} filiais lidas (substitui a base anterior).`);
     }
+    persistPendingToLocalStorage();
+    buildJoined();
+    renderAll();
     document.getElementById('pendingSummary').style.display='block';
-    document.getElementById('pendOrdersCount').textContent = fmtInt(state.pending.orders.length);
-    document.getElementById('pendReportCount').textContent = fmtInt(state.pending.report.length);
-    document.getElementById('pendGestoresCount').textContent = fmtInt(state.pending.gestoresRaw ? state.pending.gestoresRaw.length : state.gestores.length);
-    log('Pronto. Clique em "Aplicar aos dados do painel" para atualizar o painel com estes dados.');
+    document.getElementById('pendOrdersCount').textContent = fmtInt(state.rawOrders.length);
+    document.getElementById('pendReportCount').textContent = fmtInt(state.rawReport.length);
+    document.getElementById('pendGestoresCount').textContent = fmtInt(state.gestores.length);
+    log('Aplicado ao painel neste navegador. Isso ainda NÃO é visível para outras pessoas — role para baixo e clique em "Publicar no GitHub" (ou "Baixar JSON") para tornar público.');
   } catch(err){
     log('ERRO ao processar arquivos: ' + (err && err.message ? err.message : err));
   } finally {
     btn.disabled = false;
   }
-};
-
-document.getElementById('btnApplyPending').onclick = () => {
-  if (state.pending.orders.length) state.rawOrders = mergeByKey(state.rawOrders, state.pending.orders, r=>r.on);
-  if (state.pending.report.length) state.rawReport = mergeByKey(state.rawReport, state.pending.report, r=>r.order);
-  if (state.pending.gestoresRaw) state.gestores = state.pending.gestoresRaw;
-  persistPendingToLocalStorage();
-  buildJoined();
-  renderAll();
-  log('Aplicado aos dados do painel. Use "Publicar" para gravar em data/.');
 };
 
 function persistPendingToLocalStorage(){
