@@ -1164,20 +1164,25 @@ function computeFora(){
       coordenador: g ? g.coordenador : '', regional: g ? g.coordenador : '',
     });
   }
-  const foraFiltered = foraAll.filter(r => {
+  // Decisão de negócio: só contabiliza pedidos fora que TÊM filial identificável no
+  // Report (Seller Name preenchido). Os sem Seller Name (majoritariamente Retirada
+  // em Loja) ficam de fora da taxa e dos rankings, apenas reportados numa nota.
+  const foraWithBranch = foraAll.filter(r => r.sellerRaw);
+  const foraSemFilial = foraAll.length - foraWithBranch.length;
+  const foraFiltered = foraWithBranch.filter(r => {
     if (f.diretor && r.diretor !== f.diretor) return false;
     if (f.distrital && r.distrital !== f.distrital) return false;
     if (f.regional && r.regional !== f.regional) return false;
     if (f.filiais.size && !f.filiais.has(r.sellerId)) return false;
     return true;
   });
-  return { totalVtex, foraTotal: foraAll.length, foraAll, foraFiltered };
+  return { totalVtex, foraTotalAll: foraAll.length, foraComFilial: foraWithBranch.length, foraSemFilial, foraFiltered };
 }
 
-function groupForaBy(list, keyFn){
+function groupForaBy(list, keyFn, emptyLabel){
   const m = new Map();
   for (const r of list){
-    const key = keyFn(r) || '—';
+    const key = keyFn(r) || (emptyLabel || '—');
     m.set(key, (m.get(key) || 0) + 1);
   }
   return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a,b) => b.value - a.value);
@@ -1196,34 +1201,34 @@ function renderFora(){
   const d = computeFora();
   document.getElementById('foraCount').textContent = fmtInt(d.foraFiltered.length);
 
-  const taxa = d.totalVtex ? d.foraTotal / d.totalVtex : null;
+  const taxa = d.totalVtex ? d.foraComFilial / d.totalVtex : null;
   const kpis = [
     { lbl:'Pedidos VTEX (total)', val:fmtInt(d.totalVtex) },
-    { lbl:'Casados com Abbiamo', val:fmtInt(d.totalVtex - d.foraTotal), accent:'green' },
-    { lbl:'Fora do Abbiamo', val:fmtInt(d.foraFiltered.length), accent: d.foraFiltered.length>0 ? 'red' : undefined },
-    { lbl:'Taxa fora', val:fmtPct(taxa), sub:'fora ÷ total VTEX', accent: (taxa!=null && taxa>=0.02) ? 'red' : 'blue' },
+    { lbl:'Casados com Abbiamo', val:fmtInt(d.totalVtex - d.foraTotalAll), accent:'green' },
+    { lbl:'Fora do Abbiamo', val:fmtInt(d.foraFiltered.length), sub:'só com filial identificada', accent: d.foraFiltered.length>0 ? 'red' : undefined },
+    { lbl:'Taxa fora', val:fmtPct(taxa), sub:'fora c/ filial ÷ total VTEX', accent: (taxa!=null && taxa>=0.02) ? 'red' : 'blue' },
   ];
   document.getElementById('foraKpis').innerHTML = kpis.map(kpiCard).join('');
 
-  const hasBranch = d.foraFiltered.some(r => r.sellerRaw);
   const note = document.getElementById('foraNote');
-  if (d.foraTotal > 0 && !hasBranch){
+  if (d.foraSemFilial > 0){
     note.style.display = 'block';
-    note.innerHTML = '<b>Rankings por filial/gestor indisponíveis:</b> o Report do VTEX carregado não tem a coluna de loja/filial. Reenvie o Report atualizado (com a coluna de loja) em "Atualizar dados" para preencher os rankings abaixo.';
+    note.innerHTML = `<b>${fmtInt(d.foraSemFilial)}</b> pedidos fora do Abbiamo estão <b>sem filial no Report</b> (Seller Name em branco — em geral Retirada em Loja) e <b>não estão contabilizados</b> na taxa nem nos rankings abaixo.`;
   } else {
     note.style.display = 'none';
   }
 
   const total = d.foraFiltered.length;
-  const emptyMsg = d.foraTotal > 0 && !hasBranch ? 'Sem coluna de loja no Report do VTEX (veja o aviso acima).' : 'Nenhum pedido fora no filtro atual.';
+  const emptyMsg = 'Nenhum pedido fora (com filial) no filtro atual.';
+  const semGestor = '(filial não encontrada na base de gestores)';
 
-  const byFilial = groupForaBy(d.foraFiltered, r => r.filial);
+  const byFilial = groupForaBy(d.foraFiltered, r => r.filial, '(sem filial)');
   renderForaRankTable('rankForaFilial', byFilial.slice(0,10), 'Filial', total, emptyMsg);
-  const byCoord = groupForaBy(d.foraFiltered, r => r.coordenador);
+  const byCoord = groupForaBy(d.foraFiltered, r => r.coordenador, semGestor);
   renderForaRankTable('rankForaCoordenador', byCoord.slice(0,10), 'Coordenador', total, emptyMsg);
-  const byDist = groupForaBy(d.foraFiltered, r => r.distrital);
+  const byDist = groupForaBy(d.foraFiltered, r => r.distrital, semGestor);
   renderForaRankTable('rankForaDistrital', byDist.slice(0,10), 'Distrital', total, emptyMsg);
-  const byDir = groupForaBy(d.foraFiltered, r => r.diretor);
+  const byDir = groupForaBy(d.foraFiltered, r => r.diretor, semGestor);
   renderForaRankTable('rankForaDiretor', byDir.slice(0,10), 'Diretoria', total, emptyMsg);
 
   state._rankFull = state._rankFull || {};
