@@ -345,18 +345,21 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <div class="kpi-grid" id="retiradaKpis"></div>
       <div class="grid2" style="margin-top:14px">
         <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com mais pedidos em aberto (+7 dias)</h3>
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Pedidos em aberto (+7 dias)</h3>
+          <div class="modtable-toggle" id="rtRetiradaAberto" style="margin-bottom:8px"></div>
           <div class="table-wrap" id="rankRetiradaAberto"></div>
           <button class="iconbtn" style="margin-top:8px" data-export="retirada-aberto">Exportar todas</button>
         </div>
         <div class="card">
           <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Piores médias de separação — Retirada</h3>
+          <div class="modtable-toggle" id="rtRetiradaSep" style="margin-bottom:8px"></div>
           <div class="table-wrap" id="rankRetiradaSep"></div>
           <button class="iconbtn" style="margin-top:8px" data-export="retirada-sep">Exportar todas</button>
         </div>
       </div>
       <div class="card" style="margin-top:14px">
-        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com mais pedidos sem finalizar</h3>
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Pedidos sem finalizar</h3>
+        <div class="modtable-toggle" id="rtRetiradaSemFinalizar" style="margin-bottom:8px"></div>
         <div class="table-wrap" id="rankRetiradaSemFinalizar"></div>
         <button class="iconbtn" style="margin-top:8px" data-export="retirada-sem-finalizar">Exportar todas</button>
       </div>
@@ -388,18 +391,21 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 
       <div class="grid2" style="margin-top:14px">
         <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com mais atrasos</h3>
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Pedidos em atraso</h3>
+          <div class="modtable-toggle" id="rtEntregaAtraso" style="margin-bottom:8px"></div>
           <div class="table-wrap" id="rankEntregaAtraso"></div>
           <button class="iconbtn" style="margin-top:8px" data-export="entrega-atraso">Exportar todas</button>
         </div>
         <div class="card">
           <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Piores médias de separação — Entrega <span class="sub" style="font-family:var(--font-mono)">(só Entrega Rápida)</span></h3>
+          <div class="modtable-toggle" id="rtEntregaSep" style="margin-bottom:8px"></div>
           <div class="table-wrap" id="rankEntregaSep"></div>
           <button class="iconbtn" style="margin-top:8px" data-export="entrega-sep">Exportar todas</button>
         </div>
       </div>
       <div class="card" style="margin-top:14px">
-        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com mais pedidos sem andamento</h3>
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Pedidos sem andamento</h3>
+        <div class="modtable-toggle" id="rtEntregaSemAndamento" style="margin-bottom:8px"></div>
         <div class="table-wrap" id="rankEntregaSemAndamento"></div>
         <button class="iconbtn" style="margin-top:8px" data-export="entrega-sem-andamento">Exportar todas</button>
       </div>
@@ -683,6 +689,10 @@ const state = {
   suspeitasVisible: true,
   foraVisible: true,
   entregaModalTab: 'Todas',
+  rankGroupBy: {
+    retiradaAberto:'filial', retiradaSep:'filial', retiradaSemFinalizar:'filial',
+    entregaAtraso:'filial', entregaSep:'filial', entregaSemAndamento:'filial',
+  },
 };
 
 /* =====================================================================
@@ -799,16 +809,52 @@ function computeRetirada(rows){
   return { total, finalizados, abertos, abertosMais7, taxaFinalizados: total?finalizados/total:null, medSep, arr };
 }
 
-function rankBySeller(arr, valueFn, filterFn){
-  const bySeller = new Map();
+/* =====================================================================
+   RANKING GENÉRICO POR GRUPO — Filial / Coordenador / Distrital / Diretoria
+   Usado por todos os cards de ranking em Retirada e Entrega (com alternador).
+===================================================================== */
+const RANK_GROUP_LABELS = { filial:'Filial', coordenador:'Coordenador', distrital:'Distrital', diretor:'Diretoria' };
+function rankGroupKey(r, groupBy){
+  if (groupBy==='coordenador') return r.coordenador || '(sem coordenador)';
+  if (groupBy==='distrital') return r.distrital || '(sem distrital)';
+  if (groupBy==='diretor') return r.diretor || '(sem diretoria)';
+  return r.sellerId;
+}
+function rankGroupLabel(r, groupBy){
+  return groupBy==='filial' ? (r.filial || r.sellerId) : rankGroupKey(r, groupBy);
+}
+function rankByGroup(arr, groupBy, valueFn){
+  const byGroup = new Map();
   for (const r of arr){
-    if (filterFn && !filterFn(r)) continue;
-    const key = r.sellerId;
-    if (!bySeller.has(key)) bySeller.set(key, { sellerId:key, filial:r.filial, diretor:r.diretor, distrital:r.distrital, regional:r.regional, items:[] });
-    bySeller.get(key).items.push(r);
+    const key = rankGroupKey(r, groupBy);
+    if (!byGroup.has(key)) byGroup.set(key, { label: rankGroupLabel(r, groupBy), diretor:r.diretor, distrital:r.distrital, coordenador:r.coordenador, items:[] });
+    byGroup.get(key).items.push(r);
   }
-  const list = [...bySeller.values()].map(g => ({ ...g, value: valueFn(g.items) }));
-  return list.filter(g => g.value!=null);
+  return [...byGroup.values()].map(g => ({ ...g, value: valueFn(g.items) })).filter(g => g.value!=null);
+}
+function renderRankTabs(containerId, stateKey){
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const opts = ['filial','coordenador','distrital','diretor'];
+  el.innerHTML = opts.map(o => `<button data-g="${o}" class="${state.rankGroupBy[stateKey]===o?'active':''}">${RANK_GROUP_LABELS[o]}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => b.onclick = () => { state.rankGroupBy[stateKey] = b.dataset.g; renderAll(); });
+}
+/* Calcula, agrupa, ordena, renderiza a tabela e popula a exportação — um card completo. */
+function renderRankSection(o){
+  renderRankTabs(o.tabsId, o.stateKey);
+  const groupBy = state.rankGroupBy[o.stateKey];
+  let list = rankByGroup(o.arr, groupBy, o.valueFn);
+  if (o.onlyPositive) list = list.filter(g => g.value > 0);
+  list.sort((a,b) => b.value - a.value);
+  const groupLabel = RANK_GROUP_LABELS[groupBy];
+  renderRankTable(o.tableId, list.slice(0,10), o.valueLabel, o.fmt, groupLabel);
+  state._rankFull = state._rankFull || {};
+  const exportLabel = o.exportLabel || o.valueLabel;
+  const exportFmt = o.exportFmt || o.fmt;
+  state._rankFull[o.exportKey] = list.map(g => ({
+    [groupLabel]: g.label, Diretoria:g.diretor, Distrital:g.distrital, Coordenador:g.coordenador,
+    [exportLabel]: exportFmt(g.value),
+  }));
 }
 function avgSep(items){
   const v = items.filter(r=>r.createdAtAbbiamo && r.vtexCreation).map(r=>diffMinutes(r.createdAtAbbiamo,r.vtexCreation));
@@ -1007,20 +1053,21 @@ function renderRetirada(rows){
   document.getElementById('retiradaKpis').innerHTML = html;
 
   const now = new Date();
-  const abertoRank = rankBySeller(m.arr, items => items.filter(r=>isAbertoMais7(r, now)).length, null)
-    .filter(g=>g.value>0).sort((a,b)=>b.value-a.value);
-  renderRankTable('rankRetiradaAberto', abertoRank.slice(0,10), 'Quantidade', v=>fmtInt(v));
-  state._rankFull = state._rankFull || {};
-  state._rankFull['retirada-aberto'] = abertoRank.map(g=>({ Filial:g.filial, Diretor:g.diretor, Distrital:g.distrital, Regional:g.regional, Quantidade:g.value }));
-
-  const sepRank = rankBySeller(m.arr, avgSep, null).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value);
-  renderRankTable('rankRetiradaSep', sepRank.slice(0,10), 'Separação', v=>fmtMinutes(v));
-  state._rankFull['retirada-sep'] = sepRank.map(g=>({ Filial:g.filial, Diretor:g.diretor, Distrital:g.distrital, Regional:g.regional, 'Separação (hh:mm)': fmtHHMM(g.value) }));
-
-  const semFinalizarRank = rankBySeller(m.arr, items => items.filter(r=>r.status!=='SUCCESSFUL').length, null)
-    .filter(g=>g.value>0).sort((a,b)=>b.value-a.value);
-  renderRankTable('rankRetiradaSemFinalizar', semFinalizarRank.slice(0,10), 'Quantidade', v=>fmtInt(v));
-  state._rankFull['retirada-sem-finalizar'] = semFinalizarRank.map(g=>({ Filial:g.filial, Diretor:g.diretor, Distrital:g.distrital, Regional:g.regional, Quantidade:g.value }));
+  renderRankSection({
+    stateKey:'retiradaAberto', tabsId:'rtRetiradaAberto', tableId:'rankRetiradaAberto', exportKey:'retirada-aberto',
+    arr:m.arr, valueFn: items => items.filter(r=>isAbertoMais7(r, now)).length,
+    valueLabel:'Quantidade', fmt:v=>fmtInt(v), onlyPositive:true,
+  });
+  renderRankSection({
+    stateKey:'retiradaSep', tabsId:'rtRetiradaSep', tableId:'rankRetiradaSep', exportKey:'retirada-sep',
+    arr:m.arr, valueFn:avgSep, valueLabel:'Separação', fmt:v=>fmtMinutes(v),
+    exportLabel:'Separação (hh:mm)', exportFmt:v=>fmtHHMM(v),
+  });
+  renderRankSection({
+    stateKey:'retiradaSemFinalizar', tabsId:'rtRetiradaSemFinalizar', tableId:'rankRetiradaSemFinalizar', exportKey:'retirada-sem-finalizar',
+    arr:m.arr, valueFn: items => items.filter(r=>r.status!=='SUCCESSFUL').length,
+    valueLabel:'Quantidade', fmt:v=>fmtInt(v), onlyPositive:true,
+  });
 }
 
 function kpiCard(k){
@@ -1063,28 +1110,34 @@ function renderEntrega(rows){
   const flow = computeFlow(g.arr);
   document.getElementById('flowChart').innerHTML = svgBarChart(flow.map(s=>({label:s.label,value:s.minutes})), { width:460, barH:20, gap:12, valueFmt:v=>fmtMinutes(v), color:PALETTE.blue });
 
-  const atrasoRank = rankBySeller(g.arr, items => items.filter(r=>r.status==='SUCCESSFUL' && r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length, null)
-    .filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
-  renderRankTable('rankEntregaAtraso', atrasoRank.slice(0,10), 'Quantidade', v=>fmtInt(v));
-  state._rankFull = state._rankFull || {};
-  state._rankFull['entrega-atraso'] = atrasoRank.map(x=>({ Filial:x.filial, Diretor:x.diretor, Distrital:x.distrital, Regional:x.regional, Quantidade:x.value }));
-
-  const sepRank = rankBySeller(rapidaArr, avgSep, null).filter(x=>x.value!=null).sort((a,b)=>b.value-a.value);
-  renderRankTable('rankEntregaSep', sepRank.slice(0,10), 'Separação', v=>fmtMinutes(v));
-  state._rankFull['entrega-sep'] = sepRank.map(x=>({ Filial:x.filial, Diretor:x.diretor, Distrital:x.distrital, Regional:x.regional, 'Separação (hh:mm)': fmtHHMM(x.value) }));
-
   const now = new Date();
-  const semAndamentoRank = rankBySeller(g.arr, items => items.filter(r=>INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length, null)
-    .filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
-  renderRankTable('rankEntregaSemAndamento', semAndamentoRank.slice(0,10), 'Quantidade', v=>fmtInt(v));
-  state._rankFull['entrega-sem-andamento'] = semAndamentoRank.map(x=>({ Filial:x.filial, Diretor:x.diretor, Distrital:x.distrital, Regional:x.regional, Quantidade:x.value }));
+  renderRankSection({
+    stateKey:'entregaAtraso', tabsId:'rtEntregaAtraso', tableId:'rankEntregaAtraso', exportKey:'entrega-atraso',
+    arr:g.arr, valueFn: items => items.filter(r=>r.status==='SUCCESSFUL' && r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length,
+    valueLabel:'Quantidade', fmt:v=>fmtInt(v), onlyPositive:true,
+  });
+  renderRankSection({
+    stateKey:'entregaSep', tabsId:'rtEntregaSep', tableId:'rankEntregaSep', exportKey:'entrega-sep',
+    arr:rapidaArr, valueFn:avgSep, valueLabel:'Separação', fmt:v=>fmtMinutes(v),
+    exportLabel:'Separação (hh:mm)', exportFmt:v=>fmtHHMM(v),
+  });
+  renderRankSection({
+    stateKey:'entregaSemAndamento', tabsId:'rtEntregaSemAndamento', tableId:'rankEntregaSemAndamento', exportKey:'entrega-sem-andamento',
+    arr:g.arr, valueFn: items => items.filter(r=>INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length,
+    valueLabel:'Quantidade', fmt:v=>fmtInt(v), onlyPositive:true,
+  });
 }
 
-function renderRankTable(elId, list, valueLabel, fmt){
+function renderRankTable(elId, list, valueLabel, fmt, groupLabel){
   const el = document.getElementById(elId);
+  const gl = groupLabel || 'Filial';
   if (!list.length){ el.innerHTML = `<p style="padding:10px;color:var(--ink-muted);font-size:12px">Sem ocorrências no filtro atual.</p>`; return; }
-  let html = `<table class="dtable"><thead><tr><th>Filial</th><th>Distrital</th><th>${valueLabel}</th></tr></thead><tbody>`;
-  for (const r of list) html += `<tr><td>${escapeHtml(r.filial||r.sellerId)}</td><td>${escapeHtml(r.distrital||'—')}</td><td class="mono">${fmt(r.value)}</td></tr>`;
+  const showDistrital = gl === 'Filial';
+  let html = `<table class="dtable"><thead><tr><th>${escapeHtml(gl)}</th>${showDistrital?'<th>Distrital</th>':''}<th>${escapeHtml(valueLabel)}</th></tr></thead><tbody>`;
+  for (const r of list){
+    const label = r.label!=null ? r.label : (r.filial||r.sellerId);
+    html += `<tr><td>${escapeHtml(label)}</td>${showDistrital?`<td>${escapeHtml(r.distrital||'—')}</td>`:''}<td class="mono">${fmt(r.value)}</td></tr>`;
+  }
   html += `</tbody></table>`;
   el.innerHTML = html;
 }
