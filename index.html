@@ -441,7 +441,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
   <section class="panel" id="sec-fora" data-section="fora">
     <div class="panel-head">
       <h2>Fora do Abbiamo <span class="badge-count" id="foraCount">0</span></h2>
-      <span class="sub">filiais com modalidade na VTEX mas sem cobertura na Abbiamo</span>
+      <span class="sub">filiais com entrega na VTEX e nenhuma entrega na Abbiamo</span>
       <div class="panel-actions">
         <button class="iconbtn" data-export="fora-cobertura">Exportar todas</button>
         <button class="iconbtn" id="btnToggleFora">Ocultar</button>
@@ -451,7 +451,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <div class="kpi-grid" id="foraKpis"></div>
       <p class="hint" id="foraNote" style="margin-top:10px;display:none"></p>
       <div class="card" style="margin-top:14px">
-        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com cobertura incompleta na Abbiamo</h3>
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com entrega na VTEX e sem nenhuma entrega na Abbiamo</h3>
         <div class="table-wrap" id="foraCoverTable"></div>
         <button class="iconbtn" style="margin-top:8px" data-export="fora-cobertura">Exportar todas</button>
       </div>
@@ -1203,15 +1203,16 @@ function computeForaCobertura(){
         filial: g ? g.filial : '', vtexLabel: '',
         coordenador: g ? g.coordenador : '', distrital: g ? g.distrital : '',
         diretor: g ? g.diretor : '', regional: g ? g.coordenador : '',
-        vtexRetN: 0, vtexEntN: 0, abbRetN: 0, abbEntN: 0,
+        vtexEntN: 0, abbEntN: 0,
       });
     }
     return map.get(key);
   };
-  // Lado VTEX (só linhas com Seller Name → filial identificável)
+  // Lado VTEX — só ENTREGA (courrier != Retirada em Loja), só linhas com Seller Name.
   for (const rep of state.rawReport){
     const sk = (rep.seller || '').trim();
     if (!sk) continue;
+    if (/retirada em loja/i.test(rep.courrier || '')) continue;
     const creation = parseISODate(rep.creation);
     if (f.from && (!creation || creation < f.from)) continue;
     if (f.to && (!creation || creation > f.to)) continue;
@@ -1219,41 +1220,35 @@ function computeForaCobertura(){
     if (!key) continue;
     const e = ensure(key);
     if (!e.vtexLabel) e.vtexLabel = sellerNameToLabel(sk);
-    if (/retirada em loja/i.test(rep.courrier || '')) e.vtexRetN++; else e.vtexEntN++;
+    e.vtexEntN++;
   }
   // Só considera filiais que existem na base de gestores.
   let totalFiliaisVtex = 0;
   for (const e of map.values()) if (e.inBase) totalFiliaisVtex++;
-  // Lado Abbiamo (só origens válidas; só filiais que já aparecem na VTEX)
+  // Lado Abbiamo — só ENTREGA (DELIVERY), só origens válidas, só filiais que já
+  // aparecem na VTEX. parseAnyDate (não parseBRDate) porque a maioria das datas
+  // da Abbiamo vem em formato ISO — usar só BR zerava quase tudo com filtro de data.
   for (const o of state.rawOrders){
-    if (!VALID_ORIGINS.has(o.oco)) continue;
+    if (!VALID_ORIGINS.has(o.oco) || o.ot !== 'DELIVERY') continue;
     const key = normCod(o.sid);
     if (!key || !map.has(key)) continue;
-    const created = parseBRDate(o.createdAt);
+    const created = parseAnyDate(o.createdAt);
     if (f.from && (!created || created < f.from)) continue;
     if (f.to && (!created || created > f.to)) continue;
-    const e = map.get(key);
-    if (o.ot === 'TAKEOUT') e.abbRetN++; else if (o.ot === 'DELIVERY') e.abbEntN++;
+    map.get(key).abbEntN++;
   }
-  // Classifica gaps
+  // Regra: filial tem entrega na VTEX e ZERO entrega na Abbiamo.
   const rows = [];
   for (const e of map.values()){
-    if (!e.inBase) continue; // filial fora da base de gestores não entra
-    const vHasRet = e.vtexRetN > 0, vHasEnt = e.vtexEntN > 0;
-    const aHasRet = e.abbRetN > 0, aHasEnt = e.abbEntN > 0;
-    const gap = (vHasRet && !aHasRet) || (vHasEnt && !aHasEnt);
-    if (!gap) continue;
+    if (!e.inBase) continue;
+    if (e.vtexEntN === 0 || e.abbEntN > 0) continue;
     if (f.diretor && e.diretor !== f.diretor) continue;
     if (f.distrital && e.distrital !== f.distrital) continue;
     if (f.regional && e.regional !== f.regional) continue;
     if (f.filiais.size && !f.filiais.has(e.sellerId)) continue;
-    let sinal, level;
-    if (!aHasRet && !aHasEnt){ sinal = 'nenhum pedido'; level = 'crit'; }
-    else if (aHasRet && !aHasEnt){ sinal = 'só retirada'; level = 'alert'; }
-    else { sinal = 'só entrega'; level = 'alert'; }
-    rows.push({ ...e, filialNome: e.filial || e.vtexLabel || e.sellerId, vHasRet, vHasEnt, sinal, level, vtexTotal: e.vtexRetN + e.vtexEntN });
+    rows.push({ ...e, filialNome: e.filial || e.vtexLabel || e.sellerId });
   }
-  rows.sort((a,b) => b.vtexTotal - a.vtexTotal);
+  rows.sort((a,b) => b.vtexEntN - a.vtexEntN);
   return { rows, totalFiliaisVtex };
 }
 
@@ -1261,30 +1256,23 @@ function renderFora(){
   const d = computeForaCobertura();
   document.getElementById('foraCount').textContent = fmtInt(d.rows.length);
 
-  const nenhum = d.rows.filter(r => r.sinal === 'nenhum pedido').length;
-  const soRet = d.rows.filter(r => r.sinal === 'só retirada').length;
-  const soEnt = d.rows.filter(r => r.sinal === 'só entrega').length;
   const kpis = [
-    { lbl:'Filiais com pedido VTEX', val:fmtInt(d.totalFiliaisVtex) },
-    { lbl:'Filiais com gap na Abbiamo', val:fmtInt(d.rows.length), accent: d.rows.length>0 ? 'red' : undefined },
-    { lbl:'Nenhum pedido na Abbiamo', val:fmtInt(nenhum), accent: nenhum>0 ? 'red' : undefined },
-    { lbl:'Cobertura parcial', val:fmtInt(soRet+soEnt), sub:`${soRet} só retirada · ${soEnt} só entrega`, accent:(soRet+soEnt)>0 ? 'blue' : undefined },
+    { lbl:'Filiais com entrega na VTEX', val:fmtInt(d.totalFiliaisVtex) },
+    { lbl:'Sem nenhuma entrega na Abbiamo', val:fmtInt(d.rows.length), accent: d.rows.length>0 ? 'red' : undefined },
   ];
   document.getElementById('foraKpis').innerHTML = kpis.map(kpiCard).join('');
 
   const note = document.getElementById('foraNote');
   note.style.display = 'block';
-  note.innerHTML = 'Lista as filiais que <b>têm a modalidade na VTEX mas não na Abbiamo</b>. Sinal: <b>nenhum pedido</b> = a filial não tem nenhum pedido (retirada nem entrega) na Abbiamo · <b>só retirada</b> = tem retirada mas falta entrega · <b>só entrega</b> = tem entrega mas falta retirada.';
+  note.innerHTML = 'Lista as filiais que <b>têm pedido de entrega na VTEX</b> mas <b>nenhum pedido de entrega na Abbiamo</b> no período filtrado. Retirada em loja não entra nessa análise.';
 
   const el = document.getElementById('foraCoverTable');
   if (!d.rows.length){
     el.innerHTML = `<p style="padding:10px;color:var(--ink-muted);font-size:12px">Nenhuma filial com gap no filtro atual.</p>`;
   } else {
-    let html = `<table class="dtable"><thead><tr><th>Filial</th><th>Coordenador</th><th>Distrital</th><th>Diretoria</th><th>Modalidade na VTEX</th><th>Situação Abbiamo</th></tr></thead><tbody>`;
+    let html = `<table class="dtable"><thead><tr><th>Filial</th><th>Coordenador</th><th>Distrital</th><th>Diretoria</th><th>Pedidos Entrega (VTEX)</th></tr></thead><tbody>`;
     for (const r of d.rows){
-      const vtex = [r.vHasRet?'Retirada':null, r.vHasEnt?'Entrega':null].filter(Boolean).join(' + ');
-      const tagCls = r.level === 'crit' ? 'tag-crit' : 'tag-alert';
-      html += `<tr><td>${escapeHtml(r.filialNome)}</td><td>${escapeHtml(r.coordenador||'—')}</td><td>${escapeHtml(r.distrital||'—')}</td><td>${escapeHtml(r.diretor||'—')}</td><td class="mono">${escapeHtml(vtex)}</td><td><span class="tag ${tagCls}">${escapeHtml(r.sinal)}</span></td></tr>`;
+      html += `<tr><td>${escapeHtml(r.filialNome)}</td><td>${escapeHtml(r.coordenador||'—')}</td><td>${escapeHtml(r.distrital||'—')}</td><td>${escapeHtml(r.diretor||'—')}</td><td class="mono">${fmtInt(r.vtexEntN)}</td></tr>`;
     }
     html += `</tbody></table>`;
     el.innerHTML = html;
@@ -1293,8 +1281,7 @@ function renderFora(){
   state._rankFull = state._rankFull || {};
   state._rankFull['fora-cobertura'] = d.rows.map(r => ({
     Filial:r.filialNome, Cod:r.sellerId, Coordenador:r.coordenador, Distrital:r.distrital, Diretoria:r.diretor,
-    'VTEX Retirada':r.vtexRetN, 'VTEX Entrega':r.vtexEntN,
-    'Abbiamo Retirada':r.abbRetN, 'Abbiamo Entrega':r.abbEntN, Sinal:r.sinal,
+    'Pedidos Entrega VTEX':r.vtexEntN,
   }));
 }
 
