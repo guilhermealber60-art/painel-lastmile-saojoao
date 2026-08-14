@@ -351,7 +351,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
           <button class="iconbtn" style="margin-top:8px" data-export="retirada-aberto">Exportar todas</button>
         </div>
         <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Piores médias de separação — Retirada</h3>
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Piores médias de separação — Retirada <span class="sub" style="font-family:var(--font-mono)">(08h-20:59, sem controlados)</span></h3>
           <div class="modtable-toggle" id="rtRetiradaSep" style="margin-bottom:8px"></div>
           <div class="table-wrap" id="rankRetiradaSep"></div>
           <button class="iconbtn" style="margin-top:8px" data-export="retirada-sep">Exportar todas</button>
@@ -485,6 +485,11 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <label>base_Gestores — .xlsx (opcional, só quando muda)</label>
       <input type="file" id="fileGestores" accept=".xlsx">
     </div>
+    <div class="field-row">
+      <label>base_Controlados — .xlsx (opcional, só quando muda)</label>
+      <input type="file" id="fileControlados" accept=".xlsx">
+      <div class="hint">Coluna "Material" com o código do produto. Usada pra excluir pedidos com produtos controlados da média de separação da Retirada.</div>
+    </div>
     <button class="btn btn-primary" id="btnProcessFiles">Processar e aplicar ao painel</button>
     <div class="log-box" id="updateLog" style="display:none"></div>
 
@@ -492,6 +497,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <div class="summary-line">Pedidos acumulados neste navegador: <b id="pendOrdersCount">0</b></div>
       <div class="summary-line">Pedidos VTEX (dedup por Order) acumulados: <b id="pendReportCount">0</b></div>
       <div class="summary-line">Filiais na base de gestores: <b id="pendGestoresCount">0</b></div>
+      <div class="summary-line">Produtos na base de controlados: <b id="pendControladosCount">0</b></div>
     </div>
 
     <div style="margin-top:16px;padding:12px;border:1px solid var(--blue); border-radius:10px; background:var(--blue-soft)">
@@ -566,6 +572,7 @@ const PALETTE = {navy:'#1E2761', blue:'#1476C4', green:'#1E9E4A', red:'#E30D17',
 
 const LS_KEYS = {
   pendingOrders:'lm_pending_orders', pendingReport:'lm_pending_report', pendingGestores:'lm_pending_gestores',
+  pendingControlados:'lm_pending_controlados',
   ghToken:'lm_gh_token', theme:'lm_theme',
 };
 
@@ -680,6 +687,7 @@ const state = {
   rawOrders: [],      // compact schema, see pickOrderFields
   rawReport: [],       // compact schema, deduped by order at import
   gestores: [],
+  controlados: [],      // base permanente de produtos controlados (Material)
   joined: [],           // built from rawOrders + rawReport + gestores
   filters: { from:null, to:null, diretor:'', distrital:'', regional:'', filiais:new Set(), modalidades:new Set(), plataformas:new Set() },
   view: 'todos',
@@ -716,13 +724,30 @@ function pickReportSeller(r){
   for (const k of REPORT_SELLER_KEYS){ if (r[k]!=null && String(r[k]).trim()!=='') return String(r[k]).trim(); }
   return '';
 }
-function pickReportFields(r){
-  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'], seller:pickReportSeller(r) };
+/* Possíveis nomes da coluna de código do produto no Report do VTEX (autodetecção).
+   Usada pra cruzar com a base de Controlados. */
+const REPORT_SEQUENCE_KEYS = ['Sequence','sequence','SKU','Sku','sku','Material','material','Cod Produto','Código Produto','Codigo Produto','Product Id','ProductId'];
+function pickReportSequence(r){
+  for (const k of REPORT_SEQUENCE_KEYS){ if (r[k]!=null && String(r[k]).trim()!=='') return String(r[k]).trim(); }
+  return '';
+}
+/* O Report do VTEX vem no nível de SKU (várias linhas por pedido). Isso pega os
+   campos por linha; a agregação por pedido (juntando os códigos de produto) é
+   feita em dedupeReportByOrder. */
+function pickReportRawFields(r){
+  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'], seller:pickReportSeller(r), seq:pickReportSequence(r) };
 }
 function dedupeReportByOrder(rows){
   const m = new Map();
-  for (const r of rows){ if (!m.has(r.order)) m.set(r.order, r); }
-  return [...m.values()];
+  for (const r of rows){
+    let entry = m.get(r.order);
+    if (!entry){
+      entry = { order:r.order, creation:r.creation, courrier:r.courrier, slaType:r.slaType, deadline:r.deadline, seller:r.seller, prods:new Set() };
+      m.set(r.order, entry);
+    }
+    if (r.seq) entry.prods.add(r.seq);
+  }
+  return [...m.values()].map(e => ({ order:e.order, creation:e.creation, courrier:e.courrier, slaType:e.slaType, deadline:e.deadline, seller:e.seller, prods:[...e.prods] }));
 }
 function mergeByKey(existing, incoming, keyFn){
   const m = new Map(existing.map(r => [keyFn(r), r]));
@@ -736,6 +761,7 @@ function mergeByKey(existing, incoming, keyFn){
 function buildJoined(){
   const reportByOrder = new Map(state.rawReport.map(r => [r.order, r]));
   const gestorBySeller = new Map(state.gestores.map(g => [String(g.cod).trim(), g]));
+  const controlSet = new Set(state.controlados.map(c => c.material));
   const out = [];
   for (const o of state.rawOrders){
     if (!VALID_ORIGINS.has(o.oco)) continue;
@@ -746,6 +772,7 @@ function buildJoined(){
     const deliveredDate = parseAnyDate(o.delivered);
     const vtexCreation = rep ? parseISODate(rep.creation) : null;
     const promisedMinutes = (promisedDate && createdAtAbbiamo) ? diffMinutes(promisedDate, createdAtAbbiamo) : (rep ? parseDeadlineToMinutes(rep.deadline) : null);
+    const temControlado = !!(rep && rep.prods && rep.prods.some(p => controlSet.has(p)));
     let modalidade;
     if (o.ot === 'TAKEOUT') modalidade = 'Retirada em Loja';
     else if (o.ot === 'DELIVERY') modalidade = classifyEntregaModalidade(rep?rep.courrier:null, rep?rep.deadline:null, promisedMinutes);
@@ -757,7 +784,7 @@ function buildJoined(){
       createdAtAbbiamo, promisedDate, deliveredDate,
       evDispatched:parseAnyDate(o.evDispatched), evInTransit:parseAnyDate(o.evInTransit),
       evCollected:parseAnyDate(o.evCollected), evDelivered:parseAnyDate(o.evDelivered),
-      vtexCreation, courrier:rep?rep.courrier:null, modalidade,
+      vtexCreation, courrier:rep?rep.courrier:null, modalidade, temControlado,
       diretor:gestor?gestor.diretor:'', distrital:gestor?gestor.distrital:'', coordenador:gestor?gestor.coordenador:'',
       regional:gestor?gestor.coordenador:'', uf:gestor?gestor.uf:'',
       filial:gestor?gestor.filial:(o.stn||o.sid),
@@ -796,6 +823,21 @@ function isAbertoMais7(r, now){
   return !!d && (now - d)/86400000 > 7;
 }
 
+/* Regra da média de separação — só Retirada em Loja: pedido criado na VTEX entre
+   08:00 e 20:59, e sem nenhum produto controlado (cruza os códigos do Report
+   com a base de Controlados, já resolvido em r.temControlado no buildJoined). */
+function isSepElegivelRetirada(r){
+  if (!r.vtexCreation) return false;
+  const h = r.vtexCreation.getHours();
+  if (h < 8 || h > 20) return false;
+  if (r.temControlado) return false;
+  return true;
+}
+function avgSepRetirada(items){
+  const v = items.filter(r => isSepElegivelRetirada(r) && r.createdAtAbbiamo).map(r => diffMinutes(r.createdAtAbbiamo, r.vtexCreation));
+  return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
+}
+
 function computeRetirada(rows){
   const arr = rows.filter(r => r.orderType==='TAKEOUT');
   const now = new Date();
@@ -804,8 +846,7 @@ function computeRetirada(rows){
   const abertosArr = arr.filter(r => r.status!=='SUCCESSFUL');
   const abertos = abertosArr.length;
   const abertosMais7 = abertosArr.filter(r => isAbertoMais7(r, now)).length;
-  const sepVals = arr.filter(r => r.createdAtAbbiamo && r.vtexCreation).map(r => diffMinutes(r.createdAtAbbiamo, r.vtexCreation));
-  const medSep = sepVals.length ? sepVals.reduce((a,b)=>a+b,0)/sepVals.length : null;
+  const medSep = avgSepRetirada(arr);
   return { total, finalizados, abertos, abertosMais7, taxaFinalizados: total?finalizados/total:null, medSep, arr };
 }
 
@@ -1042,7 +1083,7 @@ function renderRetirada(rows){
     { lbl:'Qtd total de pedidos', val:fmtInt(m.total) },
     { lbl:'Pedidos finalizados', val:fmtInt(m.finalizados), accent:'green' },
     { lbl:'Taxa de finalizados', val:fmtPct(m.taxaFinalizados), accent:'blue' },
-    { lbl:'Méd. separação', val:fmtMinutes(m.medSep), sub: m.medSep!=null && m.medSep<=15 ? 'dentro da meta (15min)' : 'acima da meta (15min)', accent: (m.medSep!=null && m.medSep<=15)?'green':'red' },
+    { lbl:'Méd. separação', val:fmtMinutes(m.medSep), sub: (m.medSep!=null && m.medSep<=15 ? 'dentro da meta (15min)' : 'acima da meta (15min)') + ' · 08h-20:59, sem controlados', accent: (m.medSep!=null && m.medSep<=15)?'green':'red' },
   ];
   let html = kpis.map(k => kpiCard(k)).join('');
   html += `<div class="kpi ${m.abertosMais7>0?'accent-red':''}">
@@ -1060,7 +1101,7 @@ function renderRetirada(rows){
   });
   renderRankSection({
     stateKey:'retiradaSep', tabsId:'rtRetiradaSep', tableId:'rankRetiradaSep', exportKey:'retirada-sep',
-    arr:m.arr, valueFn:avgSep, valueLabel:'Separação', fmt:v=>fmtMinutes(v),
+    arr:m.arr, valueFn:avgSepRetirada, valueLabel:'Separação', fmt:v=>fmtMinutes(v),
     exportLabel:'Separação (hh:mm)', exportFmt:v=>fmtHHMM(v),
   });
   renderRankSection({
@@ -1496,7 +1537,8 @@ document.getElementById('btnProcessFiles').onclick = async () => {
   const fOrders = document.getElementById('fileOrders').files[0];
   const fReport = document.getElementById('fileReport').files[0];
   const fGestores = document.getElementById('fileGestores').files[0];
-  if (!fOrders && !fReport && !fGestores){ log('Selecione ao menos um arquivo.'); return; }
+  const fControlados = document.getElementById('fileControlados').files[0];
+  if (!fOrders && !fReport && !fGestores && !fControlados){ log('Selecione ao menos um arquivo.'); return; }
 
   const btn = document.getElementById('btnProcessFiles');
   btn.disabled = true;
@@ -1511,7 +1553,7 @@ document.getElementById('btnProcessFiles').onclick = async () => {
     if (fReport){
       log(`Lendo ${fReport.name}… (arquivo grande, pode levar alguns segundos)`);
       const rows = await parseCsvFile(fReport, ';');
-      const picked = dedupeReportByOrder(rows.map(pickReportFields).filter(r=>r.order));
+      const picked = dedupeReportByOrder(rows.map(pickReportRawFields).filter(r=>r.order));
       state.rawReport = mergeByKey(state.rawReport, picked, r=>r.order);
       log(`Report: ${rows.length} linhas (SKU) lidas · ${picked.length} pedidos distintos nesta importação · ${state.rawReport.length} acumulados no total.`);
     }
@@ -1525,6 +1567,20 @@ document.getElementById('btnProcessFiles').onclick = async () => {
       }));
       log(`Gestores: ${state.gestores.length} filiais lidas (substitui a base anterior).`);
     }
+    if (fControlados){
+      log(`Lendo ${fControlados.name}…`);
+      const rows = await parseXlsxFile(fControlados);
+      const headerKeys = rows.length ? Object.keys(rows[0]) : [];
+      const materialKey = headerKeys.find(k => /material/i.test(k)) || 'Material';
+      const flagKey = headerKeys.find(k => /controlad/i.test(k));
+      let list = rows.filter(r => r[materialKey]!=null && String(r[materialKey]).trim()!=='');
+      if (flagKey) list = list.filter(r => String(r[flagKey]||'').trim().toUpperCase()==='SIM');
+      state.controlados = list.map(r => ({
+        material:String(r[materialKey]).trim(),
+        texto:(r['Texto SD']||r['TextoSD']||'').toString().trim(),
+      }));
+      log(`Controlados: ${state.controlados.length} produtos lidos (substitui a base anterior).`);
+    }
     persistPendingToLocalStorage();
     buildJoined();
     renderAll();
@@ -1532,6 +1588,7 @@ document.getElementById('btnProcessFiles').onclick = async () => {
     document.getElementById('pendOrdersCount').textContent = fmtInt(state.rawOrders.length);
     document.getElementById('pendReportCount').textContent = fmtInt(state.rawReport.length);
     document.getElementById('pendGestoresCount').textContent = fmtInt(state.gestores.length);
+    document.getElementById('pendControladosCount').textContent = fmtInt(state.controlados.length);
     log('Aplicado ao painel neste navegador. Isso ainda NÃO é visível para outras pessoas — role para baixo e clique em "Publicar no GitHub" (ou "Baixar JSON") para tornar público.');
   } catch(err){
     log('ERRO ao processar arquivos: ' + (err && err.message ? err.message : err));
@@ -1545,6 +1602,7 @@ function persistPendingToLocalStorage(){
     localStorage.setItem(LS_KEYS.pendingOrders, JSON.stringify(state.rawOrders));
     localStorage.setItem(LS_KEYS.pendingReport, JSON.stringify(state.rawReport));
     localStorage.setItem(LS_KEYS.pendingGestores, JSON.stringify(state.gestores));
+    localStorage.setItem(LS_KEYS.pendingControlados, JSON.stringify(state.controlados));
   } catch(e){
     // Base grande não cabe no localStorage (~5 MB). Em vez de deixar um snapshot
     // antigo/parcial que sobrescreveria o publicado, apaga o rascunho local.
@@ -1557,9 +1615,11 @@ function restorePendingFromLocalStorage(){
     const o = localStorage.getItem(LS_KEYS.pendingOrders);
     const r = localStorage.getItem(LS_KEYS.pendingReport);
     const g = localStorage.getItem(LS_KEYS.pendingGestores);
+    const c = localStorage.getItem(LS_KEYS.pendingControlados);
     if (o) state.rawOrders = JSON.parse(o);
     if (r) state.rawReport = JSON.parse(r);
     if (g) state.gestores = JSON.parse(g);
+    if (c) state.controlados = JSON.parse(c);
   } catch(e){}
 }
 
@@ -1715,6 +1775,7 @@ async function publishSnapshot(){
       downloadBytes('orders.json.gz', ordersGz, 'application/gzip');
       downloadBytes('report.json.gz', reportGz, 'application/gzip');
       downloadJson('gestores.json', state.gestores);
+      downloadJson('controlados.json', state.controlados);
       showToast('Arquivos .gz baixados — suba em data/ do repositório. Dica: configure o token (⚙️) para publicar direto.');
       return;
     }
@@ -1723,7 +1784,8 @@ async function publishSnapshot(){
       { path:'data/orders.json.gz', contentB64: bytesToBase64(ordersGz) },
       { path:'data/report.json.gz', contentB64: bytesToBase64(reportGz) },
       { path:'data/gestores.json', contentObj: state.gestores },
-    ], 'Atualiza dados do painel (orders, report, gestores)');
+      { path:'data/controlados.json', contentObj: state.controlados },
+    ], 'Atualiza dados do painel (orders, report, gestores, controlados)');
     clearPendingLocalStorage(); // publicado é a fonte de verdade; não deixa rascunho velho
     showToast('Publicado no GitHub! O site atualiza para todos em alguns minutos.');
   } catch(err){
@@ -1757,13 +1819,15 @@ function clearPendingLocalStorage(){
     localStorage.removeItem(LS_KEYS.pendingOrders);
     localStorage.removeItem(LS_KEYS.pendingReport);
     localStorage.removeItem(LS_KEYS.pendingGestores);
+    localStorage.removeItem(LS_KEYS.pendingControlados);
   } catch(e){}
 }
 async function boot(){
   updatePublishBtn();
-  const [pubOrders, pubReport, pubGestores] = await Promise.all([
-    fetchDataFile('data/orders.json'), fetchDataFile('data/report.json'), fetchDataFile('data/gestores.json'),
+  const [pubOrders, pubReport, pubGestores, pubControlados] = await Promise.all([
+    fetchDataFile('data/orders.json'), fetchDataFile('data/report.json'), fetchDataFile('data/gestores.json'), fetchDataFile('data/controlados.json'),
   ]);
+  if (pubControlados) state.controlados = pubControlados;
   // Os dados PUBLICADOS são a fonte de verdade e têm prioridade sobre o localStorage.
   // (O localStorage não aguarda 91 MB — o cache local ficava com um snapshot antigo
   //  e menor que sobrescrevia o publicado, fazendo o painel abrir desatualizado.)
