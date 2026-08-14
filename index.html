@@ -726,7 +726,7 @@ function pickReportSeller(r){
 }
 /* Possíveis nomes da coluna de código do produto no Report do VTEX (autodetecção).
    Usada pra cruzar com a base de Controlados. */
-const REPORT_SEQUENCE_KEYS = ['Sequence','sequence','SKU','Sku','sku','Material','material','Cod Produto','Código Produto','Codigo Produto','Product Id','ProductId'];
+const REPORT_SEQUENCE_KEYS = ['Reference Code','ReferenceCode','reference code','Reference','Sequence','sequence','SKU','Sku','sku','Material','material','Cod Produto','Código Produto','Codigo Produto','Product Id','ProductId'];
 function pickReportSequence(r){
   for (const k of REPORT_SEQUENCE_KEYS){ if (r[k]!=null && String(r[k]).trim()!=='') return String(r[k]).trim(); }
   return '';
