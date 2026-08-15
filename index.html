@@ -329,6 +329,12 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
   <button class="topbtn" id="btnOpenUpdate">Atualizar dados</button>
   <button class="topbtn" id="btnPublish">Publicar (snapshot)</button>
   <button class="themebtn" id="btnConfigPublish" title="Configurar publicação direta no GitHub">⚙️</button>
+  <div class="viewtabs" id="quickDateTabs">
+    <button type="button" data-qd="hoje">Hoje</button>
+    <button type="button" data-qd="ontem">Ontem</button>
+    <button type="button" data-qd="semana">Essa semana</button>
+    <button type="button" data-qd="mes">Esse mês</button>
+  </div>
   <button class="themebtn" id="btnTheme" title="Alternar tema claro/escuro">🌙</button>
 </div>
 
@@ -1493,6 +1499,36 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.msel')) docu
 
 document.getElementById('fDateFrom').onchange = e => { state.filters.from = e.target.value ? new Date(e.target.value+'T00:00:00') : null; renderAll(); };
 document.getElementById('fDateTo').onchange = e => { state.filters.to = e.target.value ? new Date(e.target.value+'T23:59:59') : null; renderAll(); };
+
+/* Filtros rápidos de data — Hoje / Ontem / Essa semana (segunda até hoje) / Esse mês (dia 1 até hoje). */
+function toInputDateStr(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function applyQuickDateRange(kind){
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  let from, to;
+  if (kind === 'hoje'){
+    from = todayStart; to = todayEnd;
+  } else if (kind === 'ontem'){
+    const y = new Date(todayStart); y.setDate(y.getDate()-1);
+    from = y; to = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 23, 59, 59);
+  } else if (kind === 'semana'){
+    const day = todayStart.getDay(); // 0=domingo .. 6=sábado
+    const diffToMonday = day===0 ? 6 : day-1;
+    const monday = new Date(todayStart); monday.setDate(monday.getDate()-diffToMonday);
+    from = monday; to = todayEnd;
+  } else if (kind === 'mes'){
+    from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0); to = todayEnd;
+  } else return;
+  state.filters.from = from; state.filters.to = to;
+  document.getElementById('fDateFrom').value = toInputDateStr(from);
+  document.getElementById('fDateTo').value = toInputDateStr(to);
+  renderAll();
+}
+document.getElementById('quickDateTabs').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-qd]'); if (!btn) return;
+  applyQuickDateRange(btn.dataset.qd);
+});
 document.getElementById('fDiretor').onchange = e => { state.filters.diretor = e.target.value; renderAll(); };
 document.getElementById('fDistrital').onchange = e => { state.filters.distrital = e.target.value; renderAll(); };
 document.getElementById('fRegional').onchange = e => { state.filters.regional = e.target.value; renderAll(); };
