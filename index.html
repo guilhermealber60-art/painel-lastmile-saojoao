@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 :root{
   --navy:#1E2761;
@@ -225,7 +226,7 @@ dialog::backdrop{background:rgba(8,10,24,.6)}
 .dlg-foot{padding:14px 20px; border-top:1px solid var(--border); display:flex; gap:8px; justify-content:flex-end}
 .field-row{display:flex; flex-direction:column; gap:4px; margin-bottom:12px}
 .field-row label{font-size:11.5px; font-weight:700; color:var(--ink-2)}
-.field-row input[type=file],.field-row input[type=text],.field-row input[type=password]{
+.field-row input[type=file],.field-row input[type=text],.field-row input[type=password],.field-row select{
   border:1px solid var(--border); border-radius:7px; padding:7px 9px; font-size:12.5px; background:var(--input-bg); color:var(--ink);
 }
 .btn{border:0; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:700; cursor:pointer}
@@ -253,6 +254,53 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 .badge-count{
   background:var(--blue-soft); color:var(--blue); font-size:10.5px; font-weight:800; padding:1px 8px; border-radius:20px;
 }
+
+/* ===== FECHAMENTO OPERACIONAL (relatório mensal / imagem) — cores fixas (light),
+   independente do tema do app, pra imagem exportada ficar sempre consistente ===== */
+.fech-report{
+  width:1400px; background:#eef0f6; font-family:'Inter',system-ui,sans-serif; color:#12141f; padding:28px 32px 24px; box-sizing:border-box;
+}
+.fech-header{display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:18px; gap:20px}
+.fech-title-block{display:flex; align-items:stretch; gap:14px}
+.fech-bar{width:6px; border-radius:4px; background:#1E2761}
+.fech-title{font-family:'Archivo',sans-serif; font-size:25px; font-weight:800; color:#1E2761; letter-spacing:.2px; line-height:1.15}
+.fech-sub{display:flex; align-items:center; gap:10px; margin-top:7px; flex-wrap:wrap}
+.fech-sub b{font-family:'Archivo',sans-serif; font-size:12.5px; font-weight:800; color:#0d5fa3; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #0d5fa3; padding-bottom:2px}
+.fech-pill{background:#1E2761; color:#fff; font-size:11px; font-weight:700; padding:5px 12px; border-radius:20px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+.fech-logo{display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:1px; background:#fff; border-radius:10px; padding:10px 18px; box-shadow:0 1px 3px rgba(18,20,48,.12); flex-shrink:0}
+.fech-logo .l1{font-family:'Archivo',sans-serif; font-size:10.5px; font-weight:800; color:#c40d16; letter-spacing:1px; font-style:italic}
+.fech-logo .l2{font-family:'Archivo',sans-serif; font-size:17px; font-weight:800; color:#0d5fa3}
+
+.fech-kpis{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px}
+.fech-kpis .fkpi{flex:1 1 150px}
+.fkpi{background:#fff; border-radius:12px; box-shadow:0 1px 2px rgba(18,20,48,.1); padding:13px 14px; display:flex; flex-direction:column; gap:9px}
+.fkpi .fic{width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:15px}
+.fkpi .flbl{font-size:9.5px; font-weight:800; color:#5b6284; text-transform:uppercase; letter-spacing:.3px}
+.fkpi .fval{font-family:'Archivo',sans-serif; font-size:23px; font-weight:800; line-height:1.05}
+.fkpi .fvsub{font-size:10px; color:#5b6284; font-weight:600; line-height:1.3}
+
+.fech-body{display:flex; gap:14px; align-items:stretch}
+.fech-col{display:flex; flex-direction:column; gap:14px; min-width:0; flex:1}
+.fech-panel{background:#fff; border-radius:12px; box-shadow:0 1px 2px rgba(18,20,48,.1); padding:14px 16px}
+.fech-panel h4{margin:0 0 10px; font-family:'Archivo',sans-serif; font-size:12px; font-weight:800; color:#1E2761; display:flex; align-items:center; gap:6px}
+.fech-panel h4 .dot{width:6px; height:6px; border-radius:50%; background:#0d5fa3; display:inline-block; flex-shrink:0}
+.fech-panel h4 .mut{font-weight:600; color:#8891bb; font-size:10.5px; text-transform:none}
+.ftbl{width:100%; border-collapse:collapse; font-size:12px}
+.ftbl thead th{text-align:left; font-size:9px; text-transform:uppercase; letter-spacing:.3px; color:#8891bb; padding:5px 6px; border-bottom:1px solid #e3e6ef; font-weight:800}
+.ftbl thead th.num{text-align:right}
+.ftbl td{padding:6px 6px; border-bottom:1px solid #f0f1f7; color:#12141f; font-weight:600}
+.ftbl td.num{text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700}
+.ftbl tbody tr:last-child td{border-bottom:0}
+
+.fech-diag{background:#dcedfb; border-radius:12px; padding:16px 18px; display:flex; flex-direction:column; gap:13px; flex:1; box-sizing:border-box}
+.fech-diag h4{margin:0 0 2px; font-family:'Archivo',sans-serif; font-size:13px; font-weight:800; color:#1E2761; display:flex; align-items:center; gap:8px}
+.fech-diag .fdi{display:flex; gap:9px; align-items:flex-start}
+.fech-diag .fdi .ic{width:19px; height:19px; border-radius:6px; flex-shrink:0; display:flex; align-items:center; justify-content:center; margin-top:1px; font-size:11px}
+.fech-diag .fdi p{margin:0; font-size:11.5px; line-height:1.5; color:#333a58}
+.fech-diag .fdi p b{color:#1E2761}
+
+.fech-foot{display:flex; justify-content:flex-end; margin-top:16px}
+.fech-foot-badge{background:#1E2761; color:#fff; font-size:12px; font-weight:800; padding:8px 20px; border-radius:9px}
 </style>
 </head>
 <body>
@@ -278,6 +326,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <button data-scope="TAKEOUT">Só Retirada</button>
     </div>
   </div>
+  <button class="topbtn" id="btnOpenFechamento">Fechamento operacional</button>
   <button class="topbtn" id="btnOpenUpdate">Atualizar dados</button>
   <button class="topbtn" id="btnPublish">Publicar (snapshot)</button>
   <button class="themebtn" id="btnConfigPublish" title="Configurar publicação direta no GitHub">⚙️</button>
@@ -542,6 +591,43 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
     <button class="btn btn-danger" id="btnRemoveToken" style="margin-right:auto">Remover token deste navegador</button>
     <button class="btn btn-ghost" data-close>Fechar</button>
     <button class="btn btn-primary" id="btnSaveToken">Salvar</button>
+  </div>
+</dialog>
+
+<dialog id="dlgFechamento" style="width:min(480px,92vw)">
+  <div class="dlg-head"><h3>Fechamento operacional (imagem)</h3><button data-close>×</button></div>
+  <div class="dlg-body">
+    <p style="font-size:11.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6">
+      Gera uma imagem de fechamento mensal com os indicadores já calculados pro mês, tipo e escopo escolhidos — independe dos filtros ativos na tela.
+    </p>
+    <div class="field-row">
+      <label>Tipo</label>
+      <div class="modtable-toggle" id="fechTipoToggle">
+        <button type="button" data-tipo="entrega" class="active">Entrega</button>
+        <button type="button" data-tipo="retirada">Retirada em Loja</button>
+      </div>
+    </div>
+    <div class="field-row">
+      <label>Mês</label>
+      <select id="fechMes"></select>
+    </div>
+    <div class="field-row">
+      <label>Escopo</label>
+      <select id="fechScopeType">
+        <option value="geral">Geral (toda a rede)</option>
+        <option value="diretor">Diretoria</option>
+        <option value="distrital">Distrital</option>
+        <option value="coordenador">Coordenador</option>
+      </select>
+    </div>
+    <div class="field-row" id="fechScopeValWrap" style="display:none">
+      <label>Valor do escopo</label>
+      <select id="fechScopeVal"></select>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn btn-ghost" data-close>Cancelar</button>
+    <button class="btn btn-primary" id="btnGerarFechamento">Gerar imagem</button>
   </div>
 </dialog>
 
@@ -1798,6 +1884,277 @@ async function publishSnapshot(){
   }
 }
 document.getElementById('btnPublish').onclick = publishSnapshot;
+
+/* =====================================================================
+   FECHAMENTO OPERACIONAL (relatório mensal / imagem)
+===================================================================== */
+function fechMonthOptions(){
+  const seen = new Map();
+  for (const r of state.joined){
+    const d = r.vtexCreation || r.createdAtAbbiamo;
+    if (!d) continue;
+    const key = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    if (!seen.has(key)) seen.set(key, { y:d.getFullYear(), mo:d.getMonth() });
+  }
+  const list = [...seen.entries()].map(([key,v]) => ({ key, ...v }));
+  list.sort((a,b) => b.key.localeCompare(a.key));
+  return list.map(x => {
+    let l = new Date(x.y, x.mo, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+    l = l.charAt(0).toUpperCase() + l.slice(1);
+    return { value:x.key, label:l };
+  });
+}
+function fechScopeOptions(scopeType){
+  const field = scopeType==='diretor' ? 'diretor' : scopeType==='distrital' ? 'distrital' : 'coordenador';
+  return distinctSorted(state.joined, r => r[field]);
+}
+function fechScopeLabel(scopeType, scopeVal){
+  if (scopeType==='diretor') return 'Diretoria ' + scopeVal;
+  if (scopeType==='distrital') return 'Distrito ' + scopeVal;
+  if (scopeType==='coordenador') return 'Coordenador ' + scopeVal;
+  return 'Rede (Geral)';
+}
+function fechRows(tipo, y, mo, scopeType, scopeVal){
+  const start = new Date(y, mo, 1, 0, 0, 0);
+  const end = new Date(y, mo+1, 1, 0, 0, 0);
+  const wantType = tipo==='entrega' ? 'DELIVERY' : 'TAKEOUT';
+  return state.joined.filter(r => {
+    if (r.orderType !== wantType) return false;
+    const d = r.vtexCreation || r.createdAtAbbiamo;
+    if (!d || d < start || d >= end) return false;
+    if (scopeType==='diretor' && r.diretor !== scopeVal) return false;
+    if (scopeType==='distrital' && r.distrital !== scopeVal) return false;
+    if (scopeType==='coordenador' && r.coordenador !== scopeVal) return false;
+    return true;
+  });
+}
+
+function fechKpiHtml(icon, bg, label, val, sub, valColor){
+  return `<div class="fkpi"><div class="fic" style="background:${bg}">${icon}</div><div class="flbl">${escapeHtml(label)}</div><div class="fval" style="color:${valColor||'#1E2761'}">${val}</div>${sub?`<div class="fvsub">${escapeHtml(sub)}</div>`:''}</div>`;
+}
+function fechTableHtml(title, colLabel, valueLabel, rows, fmt){
+  const body = rows.length
+    ? rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td class="num">${fmt(r.value)}</td></tr>`).join('')
+    : `<tr><td colspan="2" style="color:#8891bb;padding:10px 6px">Sem ocorrências no período.</td></tr>`;
+  return `<div class="fech-panel"><h4><span class="dot"></span>${escapeHtml(title)}</h4>
+    <table class="ftbl"><thead><tr><th>${escapeHtml(colLabel)}</th><th class="num">${escapeHtml(valueLabel)}</th></tr></thead><tbody>${body}</tbody></table>
+  </div>`;
+}
+/* Mini bar chart com cores fixas (hex) — não usa var(--...) pra não herdar o tema
+   claro/escuro do app quando a imagem é gerada. */
+function fechBarChartSvg(items, opts){
+  opts = Object.assign({ width:400, barH:15, gap:9, labelW:120 }, opts);
+  const vals = items.map(i => i.value).filter(v => v!=null && isFinite(v));
+  const max = Math.max(1, ...vals);
+  const rowH = opts.barH + opts.gap;
+  const chartW = opts.width - opts.labelW - 46;
+  const height = items.length*rowH + 4;
+  let svg = `<svg width="100%" viewBox="0 0 ${opts.width} ${height}" xmlns="http://www.w3.org/2000/svg">`;
+  items.forEach((it,i) => {
+    const y = i*rowH + 3;
+    const w = Math.max(2, it.value/max*chartW);
+    svg += `<text x="${opts.labelW-8}" y="${y+opts.barH*0.72}" text-anchor="end" font-size="10.5" font-family="Inter,sans-serif" fill="#333a58" font-weight="600">${escapeHtml(it.label)}</text>`;
+    svg += `<rect x="${opts.labelW}" y="${y}" width="${w}" height="${opts.barH}" rx="4" fill="${it.color}"/>`;
+    svg += `<text x="${opts.labelW+w+7}" y="${y+opts.barH*0.72}" font-size="11" font-family="Inter,sans-serif" fill="#1E2761" font-weight="800">${escapeHtml(String(it.value))}</text>`;
+  });
+  svg += `</svg>`;
+  return svg;
+}
+function fechChartHtml(susp){
+  const top = susp.slice(0,10);
+  const chart = top.length
+    ? fechBarChartSvg(top.map(s => ({ label:s.filial, value:s.score, color: s.tags.some(t=>t.level==='crit') ? '#E30D17' : '#B4720B' })), { width:400, barH:15, gap:9, labelW:120 })
+    : '<p style="color:#8891bb;font-size:12px;padding:10px 0">Sem indícios no período.</p>';
+  return `<div class="fech-panel"><h4><span class="dot"></span>Top 10 — score de indícios <span class="mut">(baixas simultâneas)</span></h4>
+    ${chart}
+    <div style="display:flex;gap:14px;margin-top:10px;font-size:10.5px;color:#5b6284;font-weight:700">
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#E30D17;margin-right:5px"></span>Baixas irregulares</span>
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#B4720B;margin-right:5px"></span>Outros</span>
+    </div>
+  </div>`;
+}
+function fechDiagHtml(bullets){
+  const iconBg = { info:'#0d5fa3', alert:'#c40d16', warn:'#8f5a08', ok:'#137a38' };
+  const body = bullets.length
+    ? bullets.map(b => `<div class="fdi"><div class="ic" style="background:${iconBg[b.type]||iconBg.info}">${b.icon||'•'}</div><p>${b.html}</p></div>`).join('')
+    : `<div class="fdi"><p>Sem indícios relevantes identificados automaticamente no período.</p></div>`;
+  return `<div class="fech-diag"><h4>🔎 Diagnóstico</h4>${body}</div>`;
+}
+function fechDiagnosticoEntrega(m, scopedArr, sepRankFilial, semAndamentoRank, scopeLabel){
+  const bullets = [];
+  const topSep = sepRankFilial.slice(0,4).map(x => x.label).filter(Boolean);
+  if (topSep.length){
+    bullets.push({ type:'info', icon:'📈', html:`<b>Separação da entrega rápida</b> impacta diretamente no nível de serviço. Filiais que mais elevam esse indicador são: <b>${escapeHtml(topSep.join(', '))}</b>.` });
+  }
+  if (m.total > 0 && m.semAndamento > 0){
+    const taxaSA = m.semAndamento / m.total;
+    if (taxaSA >= 0.03){
+      const top3 = semAndamentoRank.slice(0,3).map(x => x.label).filter(Boolean);
+      const escopoTxt = scopeLabel==='Rede (Geral)' ? 'da rede' : `do ${scopeLabel}`;
+      bullets.push({ type:'alert', icon:'⚠️', html:`<b>${fmtPct(taxaSA)} dos pedidos</b> ${escopoTxt} não estão sendo finalizados, ou seja, a empresa não tem a informação do que está sendo entregue ao cliente.${top3.length?` As principais ofensoras são: <b>${escapeHtml(top3.join(', '))}</b>.`:''}` });
+    }
+  }
+  const susp = computeSuspicious(scopedArr);
+  if (susp.length){
+    bullets.push({ type:'alert', icon:'⚠️', html:`<b>Grande incidência de finalizações incorretas</b>, fazendo com que o cliente não consiga acompanhar a entrega em tempo real, e gerando atrasos que não são reais.` });
+    bullets.push({ type:'warn', icon:'⚙️', html:`<b>Problema identificado:</b> finalização dos pedidos no final do dia, uso incorreto da plataforma.` });
+  }
+  return bullets;
+}
+function fechDiagnosticoRetirada(m, scopeLabel){
+  const bullets = [];
+  const escopoTxt = scopeLabel==='Rede (Geral)' ? 'da rede' : `do ${scopeLabel}`;
+  if (m.taxaFinalizados != null && m.taxaFinalizados < 0.6){
+    bullets.push({ type:'info', icon:'✅', html:`Filiais ${escopoTxt} <b>não usam ou usam parcialmente a Abbiamo</b>, pedidos não são finalizados, fazendo com que não haja a confirmação da retirada pelo cliente.` });
+  }
+  if (m.medSep != null && m.medSep > 15){
+    bullets.push({ type:'info', icon:'✅', html:`<b>Separação de pedidos está muito aquém do esperado</b> pela empresa, ou seja, na maioria das vezes quando o cliente chega até a filial para retirar o seu pedido ele ainda não foi separado.` });
+  }
+  return bullets;
+}
+
+function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
+  const rowsScoped = fechRows(tipo, y, mo, scopeType, scopeVal);
+  const scopeLabel = fechScopeLabel(scopeType, scopeVal);
+  let monthName = new Date(y, mo, 1).toLocaleDateString('pt-BR', { month:'long' });
+  monthName = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  const now = new Date();
+
+  let kpisHtml, panelsHtml, diagBullets;
+
+  if (tipo === 'entrega'){
+    const m = computeEntregaGroup(rowsScoped);
+    const rapidaArr = rowsScoped.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
+    const rapidaMedSep = avgSep(rapidaArr);
+    const sepOk = rapidaMedSep!=null && rapidaMedSep<=15;
+    kpisHtml = [
+      fechKpiHtml('📋','#dcedfb','Qtd total pedidos', fmtInt(m.total)),
+      fechKpiHtml('✅','#d7f2df','Finalizados', fmtInt(m.finalizados), null, '#137a38'),
+      fechKpiHtml('📈','#dcedfb','SLA', fmtPct(m.sla), null, (m.sla!=null && m.sla>=0.9)?'#137a38':'#c40d16'),
+      fechKpiHtml('🕐','#d7f2df','No prazo', fmtInt(m.noPrazo), null, '#137a38'),
+      fechKpiHtml('🕐','#fbdbdc','Atraso', fmtInt(m.atraso), null, '#c40d16'),
+      fechKpiHtml('⏳','#f6e6c6','Sem andamento', fmtInt(m.semAndamento), null, m.semAndamento>0?'#8f5a08':'#1E2761'),
+      fechKpiHtml('✂️', sepOk?'#d7f2df':'#fbdbdc','Méd. sep. (rápida)', fmtMinutes(rapidaMedSep), sepOk?'dentro da meta (15min)':'acima da meta (15min)', sepOk?'#137a38':'#c40d16'),
+      fechKpiHtml('🎯','#dcedfb','Taxa de finalizados', fmtPct(m.taxaFinalizados), null, '#0d5fa3'),
+    ].join('');
+
+    const atrasoRank = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>r.status==='SUCCESSFUL' && r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
+    const semAndamentoRank = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
+    const sepRankCoord = rankByGroup(rapidaArr, 'coordenador', avgSep).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+    const sepRankFilial = rankByGroup(rapidaArr, 'filial', avgSep).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+
+    panelsHtml = `
+      <div class="fech-col" style="flex:1.1">
+        ${fechTableHtml('Pedidos em atraso','Coordenador','Qtd', atrasoRank, v=>fmtInt(v))}
+        ${fechTableHtml('Pedidos sem andamento (despachados)','Coordenador','Qtd', semAndamentoRank, v=>fmtInt(v))}
+      </div>
+      <div class="fech-col" style="flex:1.1">
+        ${fechTableHtml('Piores médias de separação — Entrega Rápida','Coordenador','Separação', sepRankCoord, v=>fmtMinutes(v))}
+        ${fechChartHtml(computeSuspicious(rowsScoped))}
+      </div>`;
+    diagBullets = fechDiagnosticoEntrega(m, rowsScoped, sepRankFilial, semAndamentoRank, scopeLabel);
+  } else {
+    const m = computeRetirada(rowsScoped);
+    const ruim = m.taxaFinalizados!=null && m.taxaFinalizados<0.6;
+    kpisHtml = [
+      fechKpiHtml('🛒','#dcedfb','Qtd total de pedidos', fmtInt(m.total)),
+      fechKpiHtml('✅','#d7f2df','Pedidos finalizados', fmtInt(m.finalizados), null, '#137a38'),
+      fechKpiHtml('🎯', ruim?'#fbdbdc':'#dcedfb','Taxa de finalizados', fmtPct(m.taxaFinalizados), null, ruim?'#c40d16':'#0d5fa3'),
+      fechKpiHtml('🕐', (m.medSep!=null&&m.medSep<=15)?'#d7f2df':'#fbdbdc','Méd. separação', fmtMinutes(m.medSep), (m.medSep!=null&&m.medSep<=15?'dentro da meta (15min)':'acima da meta (15min)')+' · 08h-20:59, sem controlados', (m.medSep!=null&&m.medSep<=15)?'#137a38':'#c40d16'),
+      fechKpiHtml('📋', m.abertosMais7>0?'#fbdbdc':'#dcedfb','Pedidos em aberto', fmtInt(m.abertosMais7), `+7 dias · ${fmtInt(m.abertos)} em aberto no total`, m.abertosMais7>0?'#c40d16':'#1E2761'),
+    ].join('');
+
+    const sepRankCoord = rankByGroup(rowsScoped, 'coordenador', avgSepRetirada).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+    const abertoRankCoord = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>isAbertoMais7(r, now)).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
+
+    panelsHtml = `
+      <div class="fech-col" style="flex:1.2">
+        ${fechTableHtml('Piores médias de separação — Retirada','Coordenador','Separação', sepRankCoord, v=>fmtMinutes(v))}
+        ${fechTableHtml('Pedidos em aberto (+7 dias · por coordenador)','Coordenador','Qtd', abertoRankCoord, v=>fmtInt(v))}
+      </div>`;
+    diagBullets = fechDiagnosticoRetirada(m, scopeLabel);
+  }
+
+  const tipoLabel = tipo==='entrega' ? '🚚 Entrega' : '🏪 Retirada em Loja';
+
+  return `<div class="fech-report">
+    <div class="fech-header">
+      <div class="fech-title-block">
+        <div class="fech-bar"></div>
+        <div>
+          <div class="fech-title">FECHAMENTO OPERACIONAL</div>
+          <div class="fech-sub"><b>${escapeHtml(monthName.toUpperCase())} · ${escapeHtml(scopeLabel.toUpperCase())}</b><span class="fech-pill">${tipoLabel}</span></div>
+        </div>
+      </div>
+      <div class="fech-logo"><span class="l1">Farmácias</span><span class="l2">São João</span></div>
+    </div>
+    <div class="fech-kpis">${kpisHtml}</div>
+    <div class="fech-body">
+      ${panelsHtml}
+      <div class="fech-col" style="flex:${tipo==='entrega'?'.9':'1'}">${fechDiagHtml(diagBullets)}</div>
+    </div>
+    <div class="fech-foot"><span class="fech-foot-badge">${escapeHtml(scopeType==='geral' ? 'Geral' : scopeVal)}</span></div>
+  </div>`;
+}
+
+const dlgFechamento = document.getElementById('dlgFechamento');
+let fechTipoAtual = 'entrega';
+function updateFechScopeUI(){
+  const t = document.getElementById('fechScopeType').value;
+  const wrap = document.getElementById('fechScopeValWrap');
+  if (t === 'geral'){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  const opts = fechScopeOptions(t);
+  document.getElementById('fechScopeVal').innerHTML = opts.length ? opts.map(o=>`<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('') : '<option value="">Sem opções</option>';
+}
+document.getElementById('btnOpenFechamento').onclick = () => {
+  if (!state.joined.length){ showToast('Carregue os dados primeiro.', 'error'); return; }
+  fechTipoAtual = 'entrega';
+  document.querySelectorAll('#fechTipoToggle button').forEach(b => b.classList.toggle('active', b.dataset.tipo==='entrega'));
+  const opts = fechMonthOptions();
+  document.getElementById('fechMes').innerHTML = opts.length ? opts.map(o=>`<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('') : '<option value="">Sem dados</option>';
+  document.getElementById('fechScopeType').value = 'geral';
+  updateFechScopeUI();
+  dlgFechamento.showModal();
+};
+dlgFechamento.querySelectorAll('[data-close]').forEach(b => b.onclick = () => dlgFechamento.close());
+document.getElementById('fechTipoToggle').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-tipo]'); if (!btn) return;
+  fechTipoAtual = btn.dataset.tipo;
+  document.querySelectorAll('#fechTipoToggle button').forEach(b => b.classList.toggle('active', b===btn));
+});
+document.getElementById('fechScopeType').onchange = updateFechScopeUI;
+document.getElementById('btnGerarFechamento').onclick = async () => {
+  const mesVal = document.getElementById('fechMes').value;
+  if (!mesVal){ showToast('Escolha um mês.', 'error'); return; }
+  const [ys, ms] = mesVal.split('-');
+  const y = parseInt(ys, 10), mo = parseInt(ms, 10) - 1;
+  const scopeType = document.getElementById('fechScopeType').value;
+  const scopeVal = scopeType==='geral' ? '' : document.getElementById('fechScopeVal').value;
+  if (scopeType !== 'geral' && !scopeVal){ showToast('Escolha um valor para o escopo.', 'error'); return; }
+
+  const html = buildFechamentoHtml(fechTipoAtual, y, mo, scopeType, scopeVal);
+  const holder = document.createElement('div');
+  holder.style.position = 'fixed'; holder.style.left = '-99999px'; holder.style.top = '0';
+  holder.innerHTML = html;
+  document.body.appendChild(holder);
+  showToast('Gerando imagem…');
+  try{
+    const el = holder.querySelector('.fech-report');
+    const canvas = await html2canvas(el, { scale:2, backgroundColor:'#eef0f6' });
+    const a = document.createElement('a');
+    const scopeSlug = (scopeType==='geral' ? 'Geral' : scopeVal).replace(/[^\w-]+/g,'_');
+    a.download = `Fechamento_${fechTipoAtual}_${mesVal}_${scopeSlug}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    showToast('Imagem gerada.');
+  } catch(err){
+    showToast('Falha ao gerar imagem: ' + err.message, 'error');
+  } finally {
+    document.body.removeChild(holder);
+    dlgFechamento.close();
+  }
+};
 
 /* =====================================================================
    BOOT
