@@ -204,6 +204,8 @@ table.dtable tbody tr:hover{background:var(--hover-bg)}
 .modtable-toggle button.active{background:var(--navy); border-color:var(--navy); color:#fff}
 :root[data-theme="dark"] .modtable-toggle button.active{background:var(--blue); border-color:var(--blue); color:#0d1024}
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .modtable-toggle button.active{background:var(--blue); border-color:var(--blue); color:#0d1024} }
+.modtable-toggle button.rank-sort-btn{margin-left:auto; border-color:var(--red); color:var(--red)}
+.modtable-toggle button.rank-sort-btn[data-dir="asc"]{border-color:var(--green); color:var(--green)}
 
 .chart-svg text{font-family:var(--font-body)}
 .bar-label{font-size:11px; fill:var(--ink-2); font-weight:600}
@@ -799,6 +801,10 @@ const state = {
     retiradaAberto:'filial', retiradaSep:'filial', retiradaSemFinalizar:'filial',
     entregaAtraso:'filial', entregaSep:'filial', entregaSemAndamento:'filial',
   },
+  rankSortDir: {
+    retiradaAberto:'desc', retiradaSep:'desc', retiradaSemFinalizar:'desc',
+    entregaAtraso:'desc', entregaSep:'desc', entregaSemAndamento:'desc',
+  },
 };
 
 /* =====================================================================
@@ -975,8 +981,13 @@ function renderRankTabs(containerId, stateKey){
   const el = document.getElementById(containerId);
   if (!el) return;
   const opts = ['filial','coordenador','distrital','diretor'];
-  el.innerHTML = opts.map(o => `<button data-g="${o}" class="${state.rankGroupBy[stateKey]===o?'active':''}">${RANK_GROUP_LABELS[o]}</button>`).join('');
-  el.querySelectorAll('button').forEach(b => b.onclick = () => { state.rankGroupBy[stateKey] = b.dataset.g; renderAll(); });
+  const dir = state.rankSortDir[stateKey] || 'desc';
+  let html = opts.map(o => `<button data-g="${o}" class="${state.rankGroupBy[stateKey]===o?'active':''}">${RANK_GROUP_LABELS[o]}</button>`).join('');
+  html += `<button data-sort-toggle class="rank-sort-btn" data-dir="${dir}">${dir==='desc' ? '↓ Piores' : '↑ Melhores'}</button>`;
+  el.innerHTML = html;
+  el.querySelectorAll('button[data-g]').forEach(b => b.onclick = () => { state.rankGroupBy[stateKey] = b.dataset.g; renderAll(); });
+  const sortBtn = el.querySelector('button[data-sort-toggle]');
+  if (sortBtn) sortBtn.onclick = () => { state.rankSortDir[stateKey] = (state.rankSortDir[stateKey]||'desc')==='desc' ? 'asc' : 'desc'; renderAll(); };
 }
 /* Calcula, agrupa, ordena, renderiza a tabela e popula a exportação — um card completo. */
 function renderRankSection(o){
@@ -984,7 +995,8 @@ function renderRankSection(o){
   const groupBy = state.rankGroupBy[o.stateKey];
   let list = rankByGroup(o.arr, groupBy, o.valueFn);
   if (o.onlyPositive) list = list.filter(g => g.value > 0);
-  list.sort((a,b) => b.value - a.value);
+  const dir = state.rankSortDir[o.stateKey] || 'desc';
+  list.sort((a,b) => dir==='desc' ? b.value - a.value : a.value - b.value);
   const groupLabel = RANK_GROUP_LABELS[groupBy];
   renderRankTable(o.tableId, list.slice(0,10), o.valueLabel, o.fmt, groupLabel);
   state._rankFull = state._rankFull || {};
