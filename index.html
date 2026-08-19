@@ -1620,9 +1620,27 @@ function renderVendaTable(elId, list, labelHeader){
   html += `</tbody></table>`;
   el.innerHTML = html;
 }
-/* Comparativo mês atual × mês anterior, por Courrier (descrição bruta da
-   coluna "Courrier" do Report VTEX — não a modalidade normalizada usada no
-   resto do painel) — venda até o mesmo "dia do mês" nos dois períodos
+/* Classifica o Courrier bruto do Report VTEX em 8 grupos fixos pro
+   comparativo mensal — "SJ" (São João) é a variante de controlados
+   entregue pela própria frota da loja; "Expressa" entra junto com
+   "Rápida". Independente das faixas de tempo usadas em
+   classifyEntregaModalidade (que é uma classificação diferente, usada
+   no resto do painel). */
+const COURRIER_MOM_ORDER = ['Entrega Rápida','Entrega Rápida SJ','Entrega Programada','Entrega Programada SJ','Entrega Padrão','Entrega Padrão SJ','Sedex','Retirada Loja'];
+function classifyCourrierMoM(courrier){
+  const c = String(courrier||'').trim();
+  const cl = c.toLowerCase();
+  if (!c) return '(sem courrier)';
+  if (cl.startsWith('retirada')) return 'Retirada Loja';
+  if (cl.includes('sedex')) return 'Sedex';
+  const isSJ = cl.endsWith('são joão') || cl.endsWith('sao joao');
+  if (cl.startsWith('entrega rápida') || cl.startsWith('entrega rapida') || cl.startsWith('entrega expressa')) return isSJ ? 'Entrega Rápida SJ' : 'Entrega Rápida';
+  if (cl.startsWith('entrega programada')) return isSJ ? 'Entrega Programada SJ' : 'Entrega Programada';
+  if (cl.startsWith('entrega padrão') || cl.startsWith('entrega padrao')) return isSJ ? 'Entrega Padrão SJ' : 'Entrega Padrão';
+  return 'Outros';
+}
+/* Comparativo mês atual × mês anterior, por Courrier (agrupado pelos 8
+   grupos acima) — venda até o mesmo "dia do mês" nos dois períodos
    (ex.: dado vai até 18/08 → compara com 01/07-18/07). A referência de
    "hoje" é a data mais recente encontrada nos dados (não a data do
    sistema), pra funcionar mesmo se a base não estiver atualizada até o
@@ -1646,7 +1664,7 @@ function computeVendaMoM(rows){
       if (r.valor==null) continue;
       const d = r.vtexCreation || r.createdAtAbbiamo;
       if (!d || d<from || d>to) continue;
-      const key = r.courrier || '(sem courrier)';
+      const key = classifyCourrierMoM(r.courrier);
       m.set(key, (m.get(key)||0) + r.valor);
     }
     return m;
@@ -1654,12 +1672,13 @@ function computeVendaMoM(rows){
   const curMap = sumByCourrier(curStart, curEnd);
   const prevMap = sumByCourrier(prevStart, prevEnd);
   const keys = new Set([...curMap.keys(), ...prevMap.keys()]);
+  const orderIdx = key => { const i = COURRIER_MOM_ORDER.indexOf(key); return i===-1 ? 999 : i; };
   const rowsOut = [...keys].map(key => {
     const cur = curMap.get(key) || 0;
     const prev = prevMap.get(key) || 0;
     const pct = prev>0 ? (cur-prev)/prev*100 : null;
     return { label:key, cur, prev, pct };
-  }).sort((a,b) => (b.cur+b.prev) - (a.cur+a.prev));
+  }).sort((a,b) => orderIdx(a.label)-orderIdx(b.label) || (b.cur+b.prev)-(a.cur+a.prev));
   return { curStart, curEnd, prevStart, prevEnd, rows:rowsOut };
 }
 function renderVendaMom(rows){
