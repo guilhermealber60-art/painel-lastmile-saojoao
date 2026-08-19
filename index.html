@@ -526,6 +526,12 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
     <div id="vendaBody">
       <div class="kpi-grid" id="vendaKpis"></div>
 
+      <div class="card" style="margin-top:14px;padding:14px">
+        <h3 style="margin:2px 0 2px;font-size:13px;color:var(--heading);font-weight:800">Comparativo com o mês anterior — por modalidade</h3>
+        <span class="sub" id="vendaMomSub" style="display:block;margin-bottom:8px"></span>
+        <div id="vendaMomList"></div>
+      </div>
+
       <div class="grid2" style="margin-top:14px">
         <div class="card">
           <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Venda e ticket médio por modalidade</h3>
@@ -1572,7 +1578,7 @@ function computeVenda(rows){
   const venda = comValor.reduce((a,r)=>a+r.valor,0);
   const pedidos = comValor.length;
   return {
-    venda, pedidos, ticket: pedidos ? venda/pedidos : null, totalPedidos: rows.length,
+    venda, pedidos, ticket: pedidos ? venda/pedidos : null,
     porModalidade: groupVenda(rows, r=>r.modalidade),
     porDistrital: groupVenda(rows, r=>r.distrital),
     porUf: groupVenda(rows, r=>r.uf),
@@ -1614,17 +1620,71 @@ function renderVendaTable(elId, list, labelHeader){
   html += `</tbody></table>`;
   el.innerHTML = html;
 }
+/* Comparativo mês atual × mês anterior, por modalidade — venda até o mesmo
+   "dia do mês" nos dois períodos (ex.: dado vai até 18/08 → compara com
+   01/07-18/07). A referência de "hoje" é a data mais recente encontrada nos
+   dados (não a data do sistema), pra funcionar mesmo se a base não estiver
+   atualizada até o dia corrente. */
+function computeVendaMoM(rows){
+  const dates = rows.map(r => r.vtexCreation || r.createdAtAbbiamo).filter(Boolean);
+  const ref = dates.length ? new Date(Math.max(...dates.map(d=>d.getTime()))) : new Date();
+  const refDay = ref.getDate();
+  const curStart = new Date(ref.getFullYear(), ref.getMonth(), 1, 0, 0, 0);
+  const curEnd = new Date(ref.getFullYear(), ref.getMonth(), refDay, 23, 59, 59);
+  const prevMonthRef = new Date(ref.getFullYear(), ref.getMonth()-1, 1);
+  const daysInPrevMonth = new Date(prevMonthRef.getFullYear(), prevMonthRef.getMonth()+1, 0).getDate();
+  const prevStart = new Date(prevMonthRef.getFullYear(), prevMonthRef.getMonth(), 1, 0, 0, 0);
+  const prevEnd = new Date(prevMonthRef.getFullYear(), prevMonthRef.getMonth(), Math.min(refDay, daysInPrevMonth), 23, 59, 59);
+
+  const sumByModalidade = (from, to) => {
+    const m = new Map();
+    for (const r of rows){
+      if (r.valor==null) continue;
+      const d = r.vtexCreation || r.createdAtAbbiamo;
+      if (!d || d<from || d>to) continue;
+      m.set(r.modalidade, (m.get(r.modalidade)||0) + r.valor);
+    }
+    return m;
+  };
+  const curMap = sumByModalidade(curStart, curEnd);
+  const prevMap = sumByModalidade(prevStart, prevEnd);
+  const mods = new Set([...curMap.keys(), ...prevMap.keys()]);
+  const rowsOut = MODALIDADES.filter(m => mods.has(m)).map(mod => {
+    const cur = curMap.get(mod) || 0;
+    const prev = prevMap.get(mod) || 0;
+    const pct = prev>0 ? (cur-prev)/prev*100 : null;
+    return { modalidade:mod, cur, prev, pct };
+  });
+  return { curStart, curEnd, prevStart, prevEnd, rows:rowsOut };
+}
+function renderVendaMom(rows){
+  const d = computeVendaMoM(rows);
+  const fd = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0');
+  document.getElementById('vendaMomSub').textContent =
+    `${fd(d.curStart)}–${fd(d.curEnd)} vs. mês anterior ${fd(d.prevStart)}–${fd(d.prevEnd)}`;
+  const el = document.getElementById('vendaMomList');
+  if (!d.rows.length){ el.innerHTML = `<p style="padding:6px 2px;color:var(--ink-muted);font-size:12px">Sem dados suficientes pra comparar no filtro atual.</p>`; return; }
+  el.innerHTML = d.rows.map(r => {
+    const badge = r.pct==null
+      ? `<span class="tag" style="background:var(--blue-soft);color:var(--blue)">novo</span>`
+      : `<span class="tag ${r.pct>=0?'tag-ok':'tag-crit'}">${r.pct>=0?'▲':'▼'} ${Math.abs(r.pct).toFixed(1)}%</span>`;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border-soft)">
+      <span style="font-size:12.5px;font-weight:600;color:var(--ink)">${escapeHtml(r.modalidade)}</span>
+      ${badge}
+    </div>`;
+  }).join('');
+}
 function renderVenda(rows){
   const v = computeVenda(rows);
   document.getElementById('vendaCount').textContent = fmtInt(v.pedidos);
-  const semValor = v.totalPedidos - v.pedidos;
   const kpis = [
     { lbl:'Venda total', val:fmtMoney(v.venda), accent:'blue' },
     { lbl:'Ticket médio', val:fmtMoney(v.ticket), accent:'green' },
-    { lbl:'Pedidos com valor VTEX', val:fmtInt(v.pedidos) },
-    { lbl:'Sem valor identificado', val:fmtInt(semValor), sub: semValor>0 ? 'pedido sem correspondência no Report VTEX' : undefined, accent: semValor>0?'red':undefined },
   ];
   document.getElementById('vendaKpis').innerHTML = kpis.map(kpiCard).join('');
+
+  const noDateRows = applyFiltersNoDate();
+  renderVendaMom(noDateRows);
 
   renderVendaTable('tableVendaModalidade', v.porModalidade, 'Modalidade');
   document.getElementById('chartVendaModalidade').innerHTML = v.porModalidade.length
@@ -1644,7 +1704,7 @@ function renderVenda(rows){
   weeksTabsEl.innerHTML = weekOpts.map(w => `<button data-weeks="${w}" class="${state.vendaWeeks===w?'active':''}">${w} semanas</button>`).join('');
   weeksTabsEl.querySelectorAll('button').forEach(b => b.onclick = () => { state.vendaWeeks = +b.dataset.weeks; renderAll(); });
 
-  const weekly = computeVendaWeekly(applyFiltersNoDate(), state.vendaWeeks);
+  const weekly = computeVendaWeekly(noDateRows, state.vendaWeeks);
   document.getElementById('chartVendaSemana').innerHTML = weekly.length
     ? svgColumnChart(weekly.map(w=>({label:w.label, value:w.venda})))
     : '<p style="padding:10px;color:var(--ink-muted);font-size:12px">Sem dados de venda para exibir evolução semanal.</p>';
