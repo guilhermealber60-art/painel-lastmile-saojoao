@@ -318,6 +318,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
     <button data-view="entrega">Entrega</button>
     <button data-view="suspeitas">Alertas</button>
     <button data-view="fora">Fora Abbiamo</button>
+    <button data-view="venda">Venda</button>
   </div>
   <div class="exportmenu" id="exportMenu">
     <button class="topbtn" id="btnExportPedidos">Exportar pedidos ▾</button>
@@ -510,6 +511,51 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
         <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Filiais com entrega na VTEX e sem nenhuma entrega na Abbiamo</h3>
         <div class="table-wrap" id="foraCoverTable"></div>
         <button class="iconbtn" style="margin-top:8px" data-export="fora-cobertura">Exportar todas</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="sec-venda" data-section="venda">
+    <div class="panel-head">
+      <h2>Venda <span class="badge-count" id="vendaCount">0</span></h2>
+      <span class="sub">valor VTEX (Total value), dedup por Order</span>
+      <div class="panel-actions">
+        <button class="iconbtn" id="btnToggleVenda">Ocultar</button>
+      </div>
+    </div>
+    <div id="vendaBody">
+      <div class="kpi-grid" id="vendaKpis"></div>
+
+      <div class="grid2" style="margin-top:14px">
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Venda e ticket médio por modalidade</h3>
+          <div class="table-wrap" id="tableVendaModalidade"></div>
+          <button class="iconbtn" style="margin-top:8px" data-export="venda-modalidade">Exportar todas</button>
+        </div>
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Venda por modalidade</h3>
+          <div id="chartVendaModalidade"></div>
+        </div>
+      </div>
+
+      <div class="grid2" style="margin-top:14px">
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Venda e ticket médio por distrital</h3>
+          <div class="table-wrap" id="tableVendaDistrital"></div>
+          <button class="iconbtn" style="margin-top:8px" data-export="venda-distrital">Exportar todas</button>
+        </div>
+        <div class="card">
+          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Venda e ticket médio por estado</h3>
+          <div class="table-wrap" id="tableVendaUf"></div>
+          <button class="iconbtn" style="margin-top:8px" data-export="venda-uf">Exportar todas</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px;padding:14px">
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Evolução de venda por semana</h3>
+        <div class="modtable-toggle" id="vendaWeeksToggle" style="margin-bottom:8px"></div>
+        <div id="chartVendaSemana"></div>
+        <p class="hint">Ignora o filtro de data De/Até (esse gráfico sempre olha as últimas semanas) — os demais filtros (diretor, distrital, filial, modalidade, plataforma) continuam valendo.</p>
       </div>
     </div>
   </section>
@@ -740,6 +786,14 @@ function fmtHHMM(min){
 }
 function fmtPct(x){ return (x==null || !isFinite(x)) ? '—' : (x*100).toFixed(1)+'%'; }
 function fmtInt(x){ return (x==null) ? '0' : x.toLocaleString('pt-BR'); }
+function fmtMoney(x){ return (x==null || !isFinite(x)) ? '—' : x.toLocaleString('pt-BR', { style:'currency', currency:'BRL' }); }
+function fmtMoneyCompact(x){
+  if (x==null || !isFinite(x)) return '—';
+  const abs = Math.abs(x);
+  if (abs>=1000000) return 'R$ '+(x/1000000).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi';
+  if (abs>=1000) return 'R$ '+(x/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mil';
+  return fmtMoney(x);
+}
 function fmtDate(d){ return d ? d.toLocaleDateString('pt-BR') : '—'; }
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -796,6 +850,8 @@ const state = {
   entregaVisible: true,
   suspeitasVisible: true,
   foraVisible: true,
+  vendaVisible: true,
+  vendaWeeks: 5,
   entregaModalTab: 'Todas',
   rankGroupBy: {
     retiradaAberto:'filial', retiradaSep:'filial', retiradaSemFinalizar:'filial',
@@ -835,23 +891,46 @@ function pickReportSequence(r){
   for (const k of REPORT_SEQUENCE_KEYS){ if (r[k]!=null && String(r[k]).trim()!=='') return String(r[k]).trim(); }
   return '';
 }
+/* Possíveis nomes da coluna de valor do pedido no Report do VTEX (autodetecção).
+   "Total value" (coluna 49) vem repetida em toda linha de SKU do mesmo pedido —
+   é o valor do PEDIDO, não da linha, então nunca deve ser somada por linha
+   (ver dedupeReportByOrder: pega uma ocorrência só por Order). */
+const REPORT_VALUE_KEYS = ['Total value','TotalValue','total value','Total Value','Valor Total','Valor total','valor total','Valor'];
+function parseMoneyValue(raw){
+  if (raw==null) return null;
+  let s = String(raw).trim().replace(/[^\d,.\-]/g,'');
+  if (s==='') return null;
+  const hasComma = s.includes(','), hasDot = s.includes('.');
+  if (hasComma && hasDot){
+    s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g,'').replace(',', '.') : s.replace(/,/g,'');
+  } else if (hasComma){
+    s = s.replace(',', '.');
+  }
+  const n = parseFloat(s);
+  return isFinite(n) ? n : null;
+}
+function pickReportValue(r){
+  for (const k of REPORT_VALUE_KEYS){ if (r[k]!=null && String(r[k]).trim()!=='') return parseMoneyValue(r[k]); }
+  return null;
+}
 /* O Report do VTEX vem no nível de SKU (várias linhas por pedido). Isso pega os
    campos por linha; a agregação por pedido (juntando os códigos de produto) é
    feita em dedupeReportByOrder. */
 function pickReportRawFields(r){
-  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'], seller:pickReportSeller(r), seq:pickReportSequence(r) };
+  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'], seller:pickReportSeller(r), seq:pickReportSequence(r), value:pickReportValue(r) };
 }
 function dedupeReportByOrder(rows){
   const m = new Map();
   for (const r of rows){
     let entry = m.get(r.order);
     if (!entry){
-      entry = { order:r.order, creation:r.creation, courrier:r.courrier, slaType:r.slaType, deadline:r.deadline, seller:r.seller, prods:new Set() };
+      entry = { order:r.order, creation:r.creation, courrier:r.courrier, slaType:r.slaType, deadline:r.deadline, seller:r.seller, value:(r.value!=null?r.value:null), prods:new Set() };
       m.set(r.order, entry);
     }
+    if (entry.value==null && r.value!=null) entry.value = r.value;
     if (r.seq) entry.prods.add(r.seq);
   }
-  return [...m.values()].map(e => ({ order:e.order, creation:e.creation, courrier:e.courrier, slaType:e.slaType, deadline:e.deadline, seller:e.seller, prods:[...e.prods] }));
+  return [...m.values()].map(e => ({ order:e.order, creation:e.creation, courrier:e.courrier, slaType:e.slaType, deadline:e.deadline, seller:e.seller, value:e.value, prods:[...e.prods] }));
 }
 function mergeByKey(existing, incoming, keyFn){
   const m = new Map(existing.map(r => [keyFn(r), r]));
@@ -889,6 +968,7 @@ function buildJoined(){
       evDispatched:parseAnyDate(o.evDispatched), evInTransit:parseAnyDate(o.evInTransit),
       evCollected:parseAnyDate(o.evCollected), evDelivered:parseAnyDate(o.evDelivered),
       vtexCreation, courrier:rep?rep.courrier:null, modalidade, temControlado,
+      valor:(rep && rep.value!=null) ? rep.value : null,
       diretor:gestor?gestor.diretor:'', distrital:gestor?gestor.distrital:'', coordenador:gestor?gestor.coordenador:'',
       regional:gestor?gestor.coordenador:'', uf:gestor?gestor.uf:'',
       filial:gestor?gestor.filial:(o.stn||o.sid),
@@ -905,6 +985,20 @@ function applyFilters(){
   return state.joined.filter(r => {
     if (f.from && (!r.createdAtAbbiamo || r.createdAtAbbiamo < f.from)) return false;
     if (f.to && (!r.createdAtAbbiamo || r.createdAtAbbiamo > f.to)) return false;
+    if (f.diretor && r.diretor !== f.diretor) return false;
+    if (f.distrital && r.distrital !== f.distrital) return false;
+    if (f.regional && r.regional !== f.regional) return false;
+    if (f.filiais.size && !f.filiais.has(r.sellerId)) return false;
+    if (f.modalidades.size && !f.modalidades.has(r.modalidade)) return false;
+    if (f.plataformas.size && !f.plataformas.has(r.carrier)) return false;
+    return true;
+  });
+}
+/* Igual a applyFilters, mas ignora De/Até — usada pela evolução semanal de
+   venda, que sempre olha as últimas semanas independente do filtro de data. */
+function applyFiltersNoDate(){
+  const f = state.filters;
+  return state.joined.filter(r => {
     if (f.diretor && r.diretor !== f.diretor) return false;
     if (f.distrital && r.distrital !== f.distrital) return false;
     if (f.regional && r.regional !== f.regional) return false;
@@ -1144,6 +1238,28 @@ function svgBarChart(items, opts){
   svg += `</svg>`;
   return svg;
 }
+function svgColumnChart(items, opts){
+  opts = Object.assign({ width:900, height:220, barGap:18, color:PALETTE.blue, valueFmt:v=>fmtMoneyCompact(v) }, opts);
+  const vals = items.map(i=>i.value).filter(v=>v!=null && isFinite(v));
+  const max = Math.max(1, ...vals);
+  const plotH = opts.height - 46;
+  const n = items.length || 1;
+  const colW = (opts.width - opts.barGap*(n+1)) / n;
+  let svg = `<svg class="chart-svg" width="100%" viewBox="0 0 ${opts.width} ${opts.height}" xmlns="http://www.w3.org/2000/svg">`;
+  items.forEach((it,i)=>{
+    const hasValue = it.value!=null && isFinite(it.value);
+    const h = hasValue ? Math.max(2, it.value/max*plotH) : 2;
+    const x = opts.barGap + i*(colW+opts.barGap);
+    const y = plotH - h + 6;
+    const color = hasValue ? (it.color||opts.color) : 'var(--border)';
+    const valueText = hasValue ? opts.valueFmt(it.value) : 'sem dados';
+    svg += `<rect x="${x}" y="${y}" width="${colW}" height="${h}" rx="4" fill="${color}"><title>${escapeHtml(it.label)}: ${escapeHtml(valueText)}</title></rect>`;
+    svg += `<text x="${x+colW/2}" y="${Math.max(10,y-6)}" text-anchor="middle" class="bar-value">${escapeHtml(valueText)}</text>`;
+    svg += `<text x="${x+colW/2}" y="${plotH+22}" text-anchor="middle" class="bar-label">${escapeHtml(it.label)}</text>`;
+  });
+  svg += `</svg>`;
+  return svg;
+}
 function svgStackedBar(segments, opts){
   opts = Object.assign({ width:480, height:34, radius:6 }, opts);
   const total = segments.reduce((a,s)=>a+s.value,0) || 1;
@@ -1169,6 +1285,7 @@ function renderAll(){
   renderEntrega(filtered);
   renderSuspeitas(filtered);
   renderFora();
+  renderVenda(filtered);
   renderStatusLine();
   applyViewVisibility();
 }
@@ -1436,6 +1553,103 @@ function renderFora(){
   }));
 }
 
+/* =====================================================================
+   VENDA (valor VTEX — "Total value", dedup por Order)
+===================================================================== */
+function groupVenda(rows, keyFn){
+  const m = new Map();
+  for (const r of rows){
+    if (r.valor==null) continue;
+    const key = keyFn(r) || '(sem informação)';
+    if (!m.has(key)) m.set(key, { label:key, venda:0, pedidos:0 });
+    const g = m.get(key);
+    g.venda += r.valor; g.pedidos += 1;
+  }
+  return [...m.values()].map(g => ({ ...g, ticket: g.pedidos ? g.venda/g.pedidos : null })).sort((a,b)=>b.venda-a.venda);
+}
+function computeVenda(rows){
+  const comValor = rows.filter(r=>r.valor!=null);
+  const venda = comValor.reduce((a,r)=>a+r.valor,0);
+  const pedidos = comValor.length;
+  return {
+    venda, pedidos, ticket: pedidos ? venda/pedidos : null, totalPedidos: rows.length,
+    porModalidade: groupVenda(rows, r=>r.modalidade),
+    porDistrital: groupVenda(rows, r=>r.distrital),
+    porUf: groupVenda(rows, r=>r.uf),
+  };
+}
+function vendaWeekStart(d){
+  const s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = s.getDay(); const diffToMonday = day===0 ? 6 : day-1;
+  s.setDate(s.getDate()-diffToMonday);
+  return s;
+}
+function fmtWeekLabel(d){
+  const end = new Date(d); end.setDate(end.getDate()+6);
+  const f = x => String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0');
+  return f(d)+'–'+f(end);
+}
+function computeVendaWeekly(rows, numWeeks){
+  const m = new Map();
+  for (const r of rows){
+    if (r.valor==null) continue;
+    const d = r.vtexCreation || r.createdAtAbbiamo;
+    if (!d) continue;
+    const ws = vendaWeekStart(d);
+    const key = ws.getTime();
+    if (!m.has(key)) m.set(key, { weekStart:ws, venda:0, pedidos:0 });
+    const g = m.get(key);
+    g.venda += r.valor; g.pedidos += 1;
+  }
+  const all = [...m.values()].sort((a,b)=>a.weekStart-b.weekStart);
+  return all.slice(-numWeeks).map(g => ({ ...g, ticket: g.pedidos ? g.venda/g.pedidos : null, label: fmtWeekLabel(g.weekStart) }));
+}
+function renderVendaTable(elId, list, labelHeader){
+  const el = document.getElementById(elId);
+  if (!list.length){ el.innerHTML = `<p style="padding:10px;color:var(--ink-muted);font-size:12px">Sem dados de venda no filtro atual.</p>`; return; }
+  let html = `<table class="dtable"><thead><tr><th>${escapeHtml(labelHeader)}</th><th>Venda</th><th>Pedidos</th><th>Ticket médio</th></tr></thead><tbody>`;
+  for (const g of list){
+    html += `<tr><td>${escapeHtml(g.label)}</td><td class="mono">${fmtMoney(g.venda)}</td><td class="mono">${fmtInt(g.pedidos)}</td><td class="mono">${fmtMoney(g.ticket)}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  el.innerHTML = html;
+}
+function renderVenda(rows){
+  const v = computeVenda(rows);
+  document.getElementById('vendaCount').textContent = fmtInt(v.pedidos);
+  const semValor = v.totalPedidos - v.pedidos;
+  const kpis = [
+    { lbl:'Venda total', val:fmtMoney(v.venda), accent:'blue' },
+    { lbl:'Ticket médio', val:fmtMoney(v.ticket), accent:'green' },
+    { lbl:'Pedidos com valor VTEX', val:fmtInt(v.pedidos) },
+    { lbl:'Sem valor identificado', val:fmtInt(semValor), sub: semValor>0 ? 'pedido sem correspondência no Report VTEX' : undefined, accent: semValor>0?'red':undefined },
+  ];
+  document.getElementById('vendaKpis').innerHTML = kpis.map(kpiCard).join('');
+
+  renderVendaTable('tableVendaModalidade', v.porModalidade, 'Modalidade');
+  document.getElementById('chartVendaModalidade').innerHTML = v.porModalidade.length
+    ? svgBarChart(v.porModalidade.map(g=>({label:g.label, value:g.venda, color:PALETTE.blue})), { width:460, barH:16, gap:9, valueFmt:x=>fmtMoneyCompact(x) })
+    : '';
+
+  renderVendaTable('tableVendaDistrital', v.porDistrital, 'Distrital');
+  renderVendaTable('tableVendaUf', v.porUf, 'Estado');
+
+  state._rankFull = state._rankFull || {};
+  state._rankFull['venda-modalidade'] = v.porModalidade.map(g=>({ Modalidade:g.label, Venda:fmtMoney(g.venda), Pedidos:g.pedidos, 'Ticket médio':fmtMoney(g.ticket) }));
+  state._rankFull['venda-distrital'] = v.porDistrital.map(g=>({ Distrital:g.label, Venda:fmtMoney(g.venda), Pedidos:g.pedidos, 'Ticket médio':fmtMoney(g.ticket) }));
+  state._rankFull['venda-uf'] = v.porUf.map(g=>({ Estado:g.label, Venda:fmtMoney(g.venda), Pedidos:g.pedidos, 'Ticket médio':fmtMoney(g.ticket) }));
+
+  const weeksTabsEl = document.getElementById('vendaWeeksToggle');
+  const weekOpts = [5,8,12,26];
+  weeksTabsEl.innerHTML = weekOpts.map(w => `<button data-weeks="${w}" class="${state.vendaWeeks===w?'active':''}">${w} semanas</button>`).join('');
+  weeksTabsEl.querySelectorAll('button').forEach(b => b.onclick = () => { state.vendaWeeks = +b.dataset.weeks; renderAll(); });
+
+  const weekly = computeVendaWeekly(applyFiltersNoDate(), state.vendaWeeks);
+  document.getElementById('chartVendaSemana').innerHTML = weekly.length
+    ? svgColumnChart(weekly.map(w=>({label:w.label, value:w.venda})))
+    : '<p style="padding:10px;color:var(--ink-muted);font-size:12px">Sem dados de venda para exibir evolução semanal.</p>';
+}
+
 function renderStatusLine(){
   const total = state.joined.length;
   document.getElementById('statusLine').textContent = `${fmtInt(total)} pedidos válidos carregados · ${fmtInt(state.gestores.length)} filiais na base de gestores`;
@@ -1453,6 +1667,7 @@ function applyViewVisibility(){
   document.getElementById('entregaBody').style.display = state.entregaVisible ? '' : 'none';
   document.getElementById('suspeitasBody').style.display = state.suspeitasVisible ? '' : 'none';
   document.getElementById('foraBody').style.display = state.foraVisible ? '' : 'none';
+  document.getElementById('vendaBody').style.display = state.vendaVisible ? '' : 'none';
 }
 
 /* =====================================================================
@@ -1579,6 +1794,11 @@ document.getElementById('btnToggleSuspeitas').onclick = (e) => {
 document.getElementById('btnToggleFora').onclick = (e) => {
   state.foraVisible = !state.foraVisible;
   e.target.textContent = state.foraVisible ? 'Ocultar' : 'Mostrar';
+  applyViewVisibility();
+};
+document.getElementById('btnToggleVenda').onclick = (e) => {
+  state.vendaVisible = !state.vendaVisible;
+  e.target.textContent = state.vendaVisible ? 'Ocultar' : 'Mostrar';
   applyViewVisibility();
 };
 
