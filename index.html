@@ -1627,7 +1627,9 @@ function renderVendaTable(elId, list, labelHeader){
    atualizada até o dia corrente. */
 function computeVendaMoM(rows){
   const dates = rows.map(r => r.vtexCreation || r.createdAtAbbiamo).filter(Boolean);
-  const ref = dates.length ? new Date(Math.max(...dates.map(d=>d.getTime()))) : new Date();
+  let maxTime = -Infinity;
+  for (const d of dates) { const t = d.getTime(); if (t > maxTime) maxTime = t; }
+  const ref = dates.length ? new Date(maxTime) : new Date();
   const refDay = ref.getDate();
   const curStart = new Date(ref.getFullYear(), ref.getMonth(), 1, 0, 0, 0);
   const curEnd = new Date(ref.getFullYear(), ref.getMonth(), refDay, 23, 59, 59);
