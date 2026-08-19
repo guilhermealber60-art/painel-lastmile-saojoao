@@ -847,11 +847,13 @@ function classifyEntregaModalidade(courrier, deadlineRaw, promisedMinutes){
   if (cl.startsWith('entrega rápida') || cl.startsWith('entrega rapida') || cl.startsWith('entrega expressa')){
     const deadlineMin = parseDeadlineToMinutes(deadlineRaw);
     const min = deadlineMin!=null ? deadlineMin : promisedMinutes;
-    if (min==null) return 'Entrega Rápida (não classificado)';
-    if (min<=47) return 'Super expressa 45min';
-    if (min>=50 && min<=80) return 'Entrega Rápida até 1 hora';
-    if (min>=105 && min<=145) return 'Entrega Rápida até 2 horas';
-    return 'Entrega Rápida (não classificado)';
+    if (min!=null){
+      if (min<=47) return 'Super expressa 45min';
+      if (min>=50 && min<=80) return 'Entrega Rápida até 1 hora';
+    }
+    // sem prazo, ou prazo fora das faixas conhecidas (ex.: 3h, 6h, 1d) — cai na
+    // faixa mais ampla da família Rápida em vez de sobrar como "não classificado".
+    return 'Entrega Rápida até 2 horas';
   }
   return 'Não classificado';
 }
