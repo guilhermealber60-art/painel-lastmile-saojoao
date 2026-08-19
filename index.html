@@ -804,6 +804,22 @@ function fmtDate(d){ return d ? d.toLocaleDateString('pt-BR') : '—'; }
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+/* Alguns exports do Report VTEX chegam com texto UTF-8 lido errado como
+   Latin-1 (às vezes duas vezes seguidas) — "Rápida" vira "RÃ¡pida" ou
+   "RÃƒÂ¡pida". escape+decodeURIComponent reverte esse tipo de corrupção;
+   aplica até 2 passadas (cobre corrupção dupla) e para assim que o texto
+   não muda mais ou não sobra nenhum caractere suspeito (Ã/Â). */
+function repairMojibake(s){
+  if (!s) return s;
+  let out = s;
+  for (let i=0; i<2 && /[ÃÂ]/.test(out); i++){
+    let fixed;
+    try { fixed = decodeURIComponent(escape(out)); } catch(e){ break; }
+    if (fixed === out) break;
+    out = fixed;
+  }
+  return out;
+}
 function parseDeadlineToMinutes(str){
   if (!str) return null;
   const s = String(str).trim().toLowerCase();
@@ -962,9 +978,10 @@ function buildJoined(){
     const vtexCreation = rep ? parseISODate(rep.creation) : null;
     const promisedMinutes = (promisedDate && createdAtAbbiamo) ? diffMinutes(promisedDate, createdAtAbbiamo) : (rep ? parseDeadlineToMinutes(rep.deadline) : null);
     const temControlado = !!(rep && rep.prods && rep.prods.some(p => controlSet.has(p)));
+    const courrierClean = rep ? repairMojibake(rep.courrier) : null;
     let modalidade;
     if (o.ot === 'TAKEOUT') modalidade = 'Retirada em Loja';
-    else if (o.ot === 'DELIVERY') modalidade = classifyEntregaModalidade(rep?rep.courrier:null, rep?rep.deadline:null, promisedMinutes);
+    else if (o.ot === 'DELIVERY') modalidade = classifyEntregaModalidade(courrierClean, rep?rep.deadline:null, promisedMinutes);
     else continue;
     out.push({
       orderNumber:o.on, orderType:o.ot, status:o.os,
@@ -973,7 +990,7 @@ function buildJoined(){
       createdAtAbbiamo, promisedDate, deliveredDate,
       evDispatched:parseAnyDate(o.evDispatched), evInTransit:parseAnyDate(o.evInTransit),
       evCollected:parseAnyDate(o.evCollected), evDelivered:parseAnyDate(o.evDelivered),
-      vtexCreation, courrier:rep?rep.courrier:null, modalidade, temControlado,
+      vtexCreation, courrier:courrierClean, modalidade, temControlado,
       valor:(rep && rep.value!=null) ? rep.value : null,
       diretor:gestor?gestor.diretor:'', distrital:gestor?gestor.distrital:'', coordenador:gestor?gestor.coordenador:'',
       regional:gestor?gestor.coordenador:'', uf:gestor?gestor.uf:'',
