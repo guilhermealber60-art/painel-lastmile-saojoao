@@ -703,7 +703,9 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
    CONSTANTS
 ===================================================================== */
 const VALID_ORIGINS = new Set(['VTEX','API-V2','API Abbiamo']);
-const INTERMEDIATE_STATUS = new Set(['CREATED','HANDLING','MANUAL_HANDLE','SCHEDULED','DISPATCHED','START_DELIVERY']);
+/* SCHEDULED (agendado) fica de fora — pedido agendado pro futuro não conta
+   como "sem andamento" mesmo com o prazo prometido já no passado. */
+const INTERMEDIATE_STATUS = new Set(['CREATED','HANDLING','MANUAL_HANDLE','DISPATCHED','START_DELIVERY']);
 const RESOLVED_STATUS = new Set(['SUCCESSFUL','FAILED','ORDER_FAILED','RETURNED','CANCELED']);
 const COLLECT_VIA_TRANSIT_CARRIERS = new Set(['UBER','99-ENTREGAS']);
 
