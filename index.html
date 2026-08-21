@@ -384,6 +384,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <h2>Cobertura das modalidades</h2>
       <span class="sub" id="coberturaSub"></span>
       <div class="panel-actions">
+        <button class="iconbtn" id="btnExportCobertura">Exportar todas</button>
         <button class="iconbtn" id="btnToggleCobertura">Ocultar</button>
       </div>
     </div>
@@ -1945,6 +1946,29 @@ function exportPedidos(scope){
   const suffix = scope==='DELIVERY' ? 'entrega' : scope==='TAKEOUT' ? 'retirada' : 'todos';
   exportRowsXlsx(rows, `pedidos-${suffix}-${todayStr()}.xlsx`, 'Pedidos');
 }
+
+function exportCobertura(){
+  const filtered = applyFilters();
+  const bySeller = new Map();
+  for (const r of filtered){
+    if (!bySeller.has(r.sellerId)) bySeller.set(r.sellerId, { r, mods: new Set() });
+    if (r.modalidade) bySeller.get(r.sellerId).mods.add(r.modalidade);
+  }
+  const rows = [];
+  for (const mod of MODALIDADES){
+    for (const { r, mods } of bySeller.values()){
+      if (!mods.has(mod)) continue;
+      rows.push({
+        Modalidade:mod, Cod:r.sellerId, Filial:r.filial,
+        Diretoria:r.diretor, Distrital:r.distrital, Coordenador:r.coordenador,
+      });
+    }
+  }
+  if (!rows.length){ alert('Nenhuma filial no filtro atual.'); return; }
+  exportRowsXlsx(rows, `cobertura-modalidades-${todayStr()}.xlsx`, 'Cobertura');
+}
+document.getElementById('btnExportCobertura').onclick = () => exportCobertura();
+
 const exportMenuEl = document.getElementById('exportMenu');
 document.getElementById('btnExportPedidos').onclick = (e) => {
   e.stopPropagation();
