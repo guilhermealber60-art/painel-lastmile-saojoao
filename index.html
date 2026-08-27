@@ -1061,11 +1061,24 @@ function isAbertoMais7(r, now){
   return !!d && (now - d)/86400000 > 7;
 }
 
+/* A separação é 100% VTEX (Creation Date -> Last Change Date), então o "dia" do
+   pedido pra bater com o filtro De/Até também tem que ser o de criação no VTEX —
+   não o da Abbiamo. Sem isso, um pedido criado dia 25 mas só sincronizado pela
+   Abbiamo dia 26 cai no balde errado com um tempo de separação de quase 1 dia. */
+function vtexDateInFilterRange(d){
+  if (!d) return false;
+  const f = state.filters;
+  if (f.from && d < f.from) return false;
+  if (f.to && d > f.to) return false;
+  return true;
+}
+
 /* Regra da média de separação — só Retirada em Loja: pedido criado na VTEX entre
    08:00 e 20:59, e sem nenhum produto controlado (cruza os códigos do Report
    com a base de Controlados, já resolvido em r.temControlado no buildJoined). */
 function isSepElegivelRetirada(r){
   if (!r.vtexCreation) return false;
+  if (!vtexDateInFilterRange(r.vtexCreation)) return false;
   const h = r.vtexCreation.getHours();
   if (h < 8 || h > 20) return false;
   if (r.temControlado) return false;
@@ -1142,7 +1155,7 @@ function renderRankSection(o){
   }));
 }
 function avgSep(items){
-  const v = items.filter(r=>r.vtexLastChange && r.vtexCreation).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
+  const v = items.filter(r=>r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
 }
 
@@ -1156,7 +1169,7 @@ function computeEntregaGroup(arr){
   const noPrazo = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate>=r.deliveredDate).length;
   const atraso = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length;
   const semAndamento = arr.filter(r => INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length;
-  const sepVals = arr.filter(r=>r.vtexLastChange && r.vtexCreation).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
+  const sepVals = arr.filter(r=>r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   const medSep = sepVals.length ? sepVals.reduce((a,b)=>a+b,0)/sepVals.length : null;
   return {
     total, finalizados: finalizados.length, noPrazo, atraso,
@@ -1198,7 +1211,7 @@ function entregaTimestamp(r){ return r.deliveredDate || r.evDelivered || null; }
 function computeFlow(deliveryArr){
   const sep=[], col=[], ent=[];
   for (const r of deliveryArr){
-    if (r.vtexLastChange && r.vtexCreation) sep.push(diffMinutes(r.vtexLastChange, r.vtexCreation));
+    if (r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)) sep.push(diffMinutes(r.vtexLastChange, r.vtexCreation));
     const c = coletaTimestamp(r);
     if (c && r.createdAtAbbiamo) col.push(diffMinutes(c, r.createdAtAbbiamo));
     const e = entregaTimestamp(r);
@@ -1985,7 +1998,7 @@ function exportSeparacao(scope){
   const arr = scope==='TAKEOUT' ? filtered : filtered.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
   const sepFn = scope==='TAKEOUT'
     ? (r => (isSepElegivelRetirada(r) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
-    : (r => (r.vtexLastChange && r.vtexCreation) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
+    : (r => (r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
   const grouped = buildSeparacaoPorFilial(arr, sepFn);
   if (!grouped.length){ alert('Nenhum pedido no filtro atual.'); return; }
   const rows = grouped.map(g => ({
