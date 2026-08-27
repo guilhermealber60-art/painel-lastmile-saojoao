@@ -1062,43 +1062,61 @@ function isAbertoMais7(r, now){
 }
 
 /* A separação é 100% VTEX (Creation Date -> Last Change Date), então o "dia" do
-   pedido pra bater com o filtro De/Até também tem que ser o de criação no VTEX —
-   não o da Abbiamo. Sem isso, um pedido criado dia 25 mas só sincronizado pela
-   Abbiamo dia 26 cai no balde errado com um tempo de separação de quase 1 dia. */
-function vtexDateInFilterRange(d){
+   pedido também tem que ser o de criação no VTEX, não o da Abbiamo — sem isso,
+   um pedido criado dia 25 mas só sincronizado pela Abbiamo dia 26 cai no balde
+   errado com um tempo de separação de quase 1 dia. from/to é sempre passado
+   explicitamente por quem chama (filtro global De/Até OU o mês do Fechamento
+   Operacional, que tem seu próprio período, independente do filtro do topo). */
+function dateInRange(d, from, to){
   if (!d) return false;
-  const f = state.filters;
-  if (f.from && d < f.from) return false;
-  if (f.to && d > f.to) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
   return true;
+}
+/* Igual a applyFilters, mas a janela De/Até bate com a criação no VTEX em vez
+   da Abbiamo — usada só pelas métricas de separação, pra pedidos "atrasados"
+   na sincronização da Abbiamo caírem no dia certo (o do VTEX). */
+function applyFiltersVtex(){
+  const f = state.filters;
+  return state.joined.filter(r => {
+    if (!dateInRange(r.vtexCreation, f.from, f.to)) return false;
+    if (f.diretor && r.diretor !== f.diretor) return false;
+    if (f.distrital && r.distrital !== f.distrital) return false;
+    if (f.regional && r.regional !== f.regional) return false;
+    if (f.filiais.size && !f.filiais.has(r.sellerId)) return false;
+    if (f.modalidades.size && !f.modalidades.has(r.modalidade)) return false;
+    if (f.plataformas.size && !f.plataformas.has(r.carrier)) return false;
+    return true;
+  });
 }
 
 /* Regra da média de separação — só Retirada em Loja: pedido criado na VTEX entre
    08:00 e 20:59, e sem nenhum produto controlado (cruza os códigos do Report
    com a base de Controlados, já resolvido em r.temControlado no buildJoined). */
-function isSepElegivelRetirada(r){
+function isSepElegivelRetirada(r, from, to){
   if (!r.vtexCreation) return false;
-  if (!vtexDateInFilterRange(r.vtexCreation)) return false;
+  if (!dateInRange(r.vtexCreation, from, to)) return false;
   const h = r.vtexCreation.getHours();
   if (h < 8 || h > 20) return false;
   if (r.temControlado) return false;
   return true;
 }
-function avgSepRetirada(items){
-  const v = items.filter(r => isSepElegivelRetirada(r) && r.vtexLastChange).map(r => diffMinutes(r.vtexLastChange, r.vtexCreation));
+function avgSepRetirada(items, from, to){
+  const v = items.filter(r => isSepElegivelRetirada(r, from, to) && r.vtexLastChange).map(r => diffMinutes(r.vtexLastChange, r.vtexCreation));
   return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
 }
 
-function computeRetirada(rows){
+function computeRetirada(rows, rowsVtex, from, to){
   const arr = rows.filter(r => r.orderType==='TAKEOUT');
+  const arrVtex = (rowsVtex||rows).filter(r => r.orderType==='TAKEOUT');
   const now = new Date();
   const total = arr.length;
   const finalizados = arr.filter(r => r.status==='SUCCESSFUL').length;
   const abertosArr = arr.filter(r => r.status!=='SUCCESSFUL');
   const abertos = abertosArr.length;
   const abertosMais7 = abertosArr.filter(r => isAbertoMais7(r, now)).length;
-  const medSep = avgSepRetirada(arr);
-  return { total, finalizados, abertos, abertosMais7, taxaFinalizados: total?finalizados/total:null, medSep, arr };
+  const medSep = avgSepRetirada(arrVtex, from, to);
+  return { total, finalizados, abertos, abertosMais7, taxaFinalizados: total?finalizados/total:null, medSep, arr, arrVtex };
 }
 
 /* =====================================================================
@@ -1154,36 +1172,38 @@ function renderRankSection(o){
     [exportLabel]: exportFmt(g.value),
   }));
 }
-function avgSep(items){
-  const v = items.filter(r=>r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
+function avgSep(items, from, to){
+  const v = items.filter(r=>r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
 }
 
 /* =====================================================================
    METRICS — Entrega
 ===================================================================== */
-function computeEntregaGroup(arr){
+function computeEntregaGroup(arr, arrVtex, from, to){
+  arrVtex = arrVtex || arr;
   const now = new Date();
   const total = arr.length;
   const finalizados = arr.filter(r=>r.status==='SUCCESSFUL');
   const noPrazo = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate>=r.deliveredDate).length;
   const atraso = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length;
   const semAndamento = arr.filter(r => INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length;
-  const sepVals = arr.filter(r=>r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
+  const sepVals = arrVtex.filter(r=>r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   const medSep = sepVals.length ? sepVals.reduce((a,b)=>a+b,0)/sepVals.length : null;
   return {
     total, finalizados: finalizados.length, noPrazo, atraso,
     sla: finalizados.length? noPrazo/finalizados.length : null,
-    semAndamento, medSep, taxaFinalizados: total? finalizados.length/total : null, arr,
+    semAndamento, medSep, taxaFinalizados: total? finalizados.length/total : null, arr, arrVtex,
   };
 }
-function computeEntrega(rows){
+function computeEntrega(rows, rowsVtex, from, to){
   const arr = rows.filter(r => r.orderType==='DELIVERY');
-  const overall = computeEntregaGroup(arr);
+  const arrVtex = (rowsVtex||rows).filter(r => r.orderType==='DELIVERY');
+  const overall = computeEntregaGroup(arr, arrVtex, from, to);
   const porModalidade = {};
-  for (const mod of ENTREGA_MODALIDADES){ porModalidade[mod] = computeEntregaGroup(arr.filter(r=>r.modalidade===mod)); }
+  for (const mod of ENTREGA_MODALIDADES){ porModalidade[mod] = computeEntregaGroup(arr.filter(r=>r.modalidade===mod), arrVtex.filter(r=>r.modalidade===mod), from, to); }
   const naoClassificado = arr.filter(r => r.modalidade==='Não classificado' || r.modalidade==='Entrega Rápida (não classificado)');
-  return { overall, porModalidade, naoClassificadoCount: naoClassificado.length, arr };
+  return { overall, porModalidade, naoClassificadoCount: naoClassificado.length, arr, arrVtex };
 }
 
 /* =====================================================================
@@ -1208,10 +1228,12 @@ function coletaTimestamp(r){
 }
 function entregaTimestamp(r){ return r.deliveredDate || r.evDelivered || null; }
 
-function computeFlow(deliveryArr){
+function computeFlow(deliveryArr, deliveryArrVtex, from, to){
   const sep=[], col=[], ent=[];
+  for (const r of (deliveryArrVtex||deliveryArr)){
+    if (r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to)) sep.push(diffMinutes(r.vtexLastChange, r.vtexCreation));
+  }
   for (const r of deliveryArr){
-    if (r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)) sep.push(diffMinutes(r.vtexLastChange, r.vtexCreation));
     const c = coletaTimestamp(r);
     if (c && r.createdAtAbbiamo) col.push(diffMinutes(c, r.createdAtAbbiamo));
     const e = entregaTimestamp(r);
@@ -1332,10 +1354,11 @@ function svgStackedBar(segments, opts){
 ===================================================================== */
 function renderAll(){
   const filtered = applyFilters();
+  const filteredVtex = applyFiltersVtex();
   renderFilterOptions();
   renderCobertura(filtered);
-  renderRetirada(filtered);
-  renderEntrega(filtered);
+  renderRetirada(filtered, filteredVtex);
+  renderEntrega(filtered, filteredVtex);
   renderSuspeitas(filtered);
   renderFora();
   renderVenda(filtered);
@@ -1356,8 +1379,9 @@ function renderCobertura(rows){
   body.innerHTML = html;
 }
 
-function renderRetirada(rows){
-  const m = computeRetirada(rows);
+function renderRetirada(rows, rowsVtex){
+  const f = state.filters;
+  const m = computeRetirada(rows, rowsVtex, f.from, f.to);
   document.getElementById('retiradaCount').textContent = fmtInt(m.total);
   const kpis = [
     { lbl:'Qtd total de pedidos', val:fmtInt(m.total) },
@@ -1381,7 +1405,7 @@ function renderRetirada(rows){
   });
   renderRankSection({
     stateKey:'retiradaSep', tabsId:'rtRetiradaSep', tableId:'rankRetiradaSep', exportKey:'retirada-sep',
-    arr:m.arr, valueFn:avgSepRetirada, valueLabel:'Separação', fmt:v=>fmtMinutes(v),
+    arr:m.arrVtex, valueFn: items => avgSepRetirada(items, f.from, f.to), valueLabel:'Separação', fmt:v=>fmtMinutes(v),
     exportLabel:'Separação (hh:mm)', exportFmt:v=>fmtHHMM(v),
   });
   renderRankSection({
@@ -1399,8 +1423,9 @@ function kpiCard(k){
   </div>`;
 }
 
-function renderEntrega(rows){
-  const e = computeEntrega(rows);
+function renderEntrega(rows, rowsVtex){
+  const f = state.filters;
+  const e = computeEntrega(rows, rowsVtex, f.from, f.to);
   document.getElementById('entregaCount').textContent = fmtInt(e.overall.total);
 
   const tabsEl = document.getElementById('modalidadeToggle');
@@ -1409,8 +1434,8 @@ function renderEntrega(rows){
   tabsEl.querySelectorAll('button').forEach(b => b.onclick = () => { state.entregaModalTab = b.dataset.mod; renderAll(); });
 
   const g = state.entregaModalTab==='Todas' ? e.overall : e.porModalidade[state.entregaModalTab];
-  const rapidaArr = e.overall.arr.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
-  const rapidaMedSep = avgSep(rapidaArr);
+  const rapidaArr = e.overall.arrVtex.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
+  const rapidaMedSep = avgSep(rapidaArr, f.from, f.to);
   const sepOk = rapidaMedSep!=null && rapidaMedSep<=15;
   const kpis = [
     { lbl:'Qtd total pedidos', val:fmtInt(g.total) },
@@ -1428,7 +1453,7 @@ function renderEntrega(rows){
     svgStackedBar([{label:'No prazo', value:g.noPrazo, color:PALETTE.green},{label:'Atraso', value:g.atraso, color:PALETTE.red}], {width:460,height:30}) +
     `<div class="legend"><span><span class="sw" style="background:${PALETTE.green}"></span>No prazo (${fmtInt(g.noPrazo)})</span><span><span class="sw" style="background:${PALETTE.red}"></span>Atraso (${fmtInt(g.atraso)})</span></div>`;
 
-  const flow = computeFlow(g.arr);
+  const flow = computeFlow(g.arr, g.arrVtex, f.from, f.to);
   document.getElementById('flowChart').innerHTML = svgBarChart(flow.map(s=>({label:s.label,value:s.minutes})), { width:460, barH:20, gap:12, valueFmt:v=>fmtMinutes(v), color:PALETTE.blue });
 
   const now = new Date();
@@ -1439,7 +1464,7 @@ function renderEntrega(rows){
   });
   renderRankSection({
     stateKey:'entregaSep', tabsId:'rtEntregaSep', tableId:'rankEntregaSep', exportKey:'entrega-sep',
-    arr:rapidaArr, valueFn:avgSep, valueLabel:'Separação', fmt:v=>fmtMinutes(v),
+    arr:rapidaArr, valueFn: items => avgSep(items, f.from, f.to), valueLabel:'Separação', fmt:v=>fmtMinutes(v),
     exportLabel:'Separação (hh:mm)', exportFmt:v=>fmtHHMM(v),
   });
   renderRankSection({
@@ -1994,11 +2019,12 @@ function buildSeparacaoPorFilial(arr, sepFn){
     .sort((a,b) => a.filial.localeCompare(b.filial, 'pt-BR'));
 }
 function exportSeparacao(scope){
-  const filtered = applyFilters().filter(r => r.orderType===scope);
+  const f = state.filters;
+  const filtered = applyFiltersVtex().filter(r => r.orderType===scope);
   const arr = scope==='TAKEOUT' ? filtered : filtered.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
   const sepFn = scope==='TAKEOUT'
-    ? (r => (isSepElegivelRetirada(r) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
-    : (r => (r.vtexLastChange && r.vtexCreation && vtexDateInFilterRange(r.vtexCreation)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
+    ? (r => (isSepElegivelRetirada(r, f.from, f.to) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
+    : (r => (r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, f.from, f.to)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
   const grouped = buildSeparacaoPorFilial(arr, sepFn);
   if (!grouped.length){ alert('Nenhum pedido no filtro atual.'); return; }
   const rows = grouped.map(g => ({
@@ -2490,6 +2516,11 @@ function fechDiagnosticoRetirada(m, scopeLabel){
 
 function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
   const rowsScoped = fechRows(tipo, y, mo, scopeType, scopeVal);
+  // Mesmo período do fechRows — usado pra ancorar a separação na criação do
+  // VTEX, independente do filtro De/Até global do topo (o Fechamento tem seu
+  // próprio período, escolhido no seletor de mês/ano deste painel).
+  const sepFrom = new Date(y, mo, 1, 0, 0, 0);
+  const sepTo = new Date(y, mo+1, 1, 0, 0, 0);
   const scopeLabel = fechScopeLabel(scopeType, scopeVal);
   let monthName = new Date(y, mo, 1).toLocaleDateString('pt-BR', { month:'long' });
   monthName = monthName.charAt(0).toUpperCase() + monthName.slice(1);
@@ -2498,9 +2529,9 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
   let kpisHtml, panelsHtml, diagBullets;
 
   if (tipo === 'entrega'){
-    const m = computeEntregaGroup(rowsScoped);
+    const m = computeEntregaGroup(rowsScoped, rowsScoped, sepFrom, sepTo);
     const rapidaArr = rowsScoped.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
-    const rapidaMedSep = avgSep(rapidaArr);
+    const rapidaMedSep = avgSep(rapidaArr, sepFrom, sepTo);
     const sepOk = rapidaMedSep!=null && rapidaMedSep<=15;
     kpisHtml = [
       fechKpiHtml('📋','#dcedfb','Qtd total pedidos', fmtInt(m.total)),
@@ -2515,8 +2546,8 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
 
     const atrasoRank = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>r.status==='SUCCESSFUL' && r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
     const semAndamentoRank = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
-    const sepRankCoord = rankByGroup(rapidaArr, 'coordenador', avgSep).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
-    const sepRankFilial = rankByGroup(rapidaArr, 'filial', avgSep).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+    const sepRankCoord = rankByGroup(rapidaArr, 'coordenador', items => avgSep(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+    const sepRankFilial = rankByGroup(rapidaArr, 'filial', items => avgSep(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
 
     panelsHtml = `
       <div class="fech-col" style="flex:1.1">
@@ -2529,7 +2560,7 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
       </div>`;
     diagBullets = fechDiagnosticoEntrega(m, rowsScoped, sepRankFilial, semAndamentoRank, scopeLabel);
   } else {
-    const m = computeRetirada(rowsScoped);
+    const m = computeRetirada(rowsScoped, rowsScoped, sepFrom, sepTo);
     const ruim = m.taxaFinalizados!=null && m.taxaFinalizados<0.6;
     kpisHtml = [
       fechKpiHtml('🛒','#dcedfb','Qtd total de pedidos', fmtInt(m.total)),
@@ -2539,7 +2570,7 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
       fechKpiHtml('📋', m.abertosMais7>0?'#fbdbdc':'#dcedfb','Pedidos em aberto', fmtInt(m.abertosMais7), `+7 dias · ${fmtInt(m.abertos)} em aberto no total`, m.abertosMais7>0?'#c40d16':'#1E2761'),
     ].join('');
 
-    const sepRankCoord = rankByGroup(rowsScoped, 'coordenador', avgSepRetirada).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+    const sepRankCoord = rankByGroup(rowsScoped, 'coordenador', items => avgSepRetirada(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
     const abertoRankCoord = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>isAbertoMais7(r, now)).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
 
     panelsHtml = `
