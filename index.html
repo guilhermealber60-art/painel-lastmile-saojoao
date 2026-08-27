@@ -1093,6 +1093,14 @@ function applyFiltersVtex(){
   });
 }
 
+/* A análise de separação é sempre dia a dia — um pedido cuja "Last Change
+   Date" cai num calendário diferente da "Creation Date" (ex.: criado às 23h,
+   só mudou de status depois da meia-noite) não entra na conta: não faz
+   sentido "vazar" o tempo de separação de um dia pro outro. */
+function sameCalendarDay(a, b){
+  return !!a && !!b && a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+}
+
 /* Regra da média de separação — só Retirada em Loja: pedido criado na VTEX entre
    08:00 e 20:59, e sem nenhum produto controlado (cruza os códigos do Report
    com a base de Controlados, já resolvido em r.temControlado no buildJoined). */
@@ -1102,6 +1110,7 @@ function isSepElegivelRetirada(r, from, to){
   const h = r.vtexCreation.getHours();
   if (h < 8 || h > 20) return false;
   if (r.temControlado) return false;
+  if (r.vtexLastChange && !sameCalendarDay(r.vtexCreation, r.vtexLastChange)) return false;
   return true;
 }
 function avgSepRetirada(items, from, to){
@@ -1176,7 +1185,7 @@ function renderRankSection(o){
   }));
 }
 function avgSep(items, from, to){
-  const v = items.filter(r=>r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
+  const v = items.filter(r=>r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to) && sameCalendarDay(r.vtexCreation, r.vtexLastChange)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
 }
 
@@ -1191,7 +1200,7 @@ function computeEntregaGroup(arr, arrVtex, from, to){
   const noPrazo = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate>=r.deliveredDate).length;
   const atraso = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length;
   const semAndamento = arr.filter(r => INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length;
-  const sepVals = arrVtex.filter(r=>r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
+  const sepVals = arrVtex.filter(r=>r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to) && sameCalendarDay(r.vtexCreation, r.vtexLastChange)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   const medSep = sepVals.length ? sepVals.reduce((a,b)=>a+b,0)/sepVals.length : null;
   return {
     total, finalizados: finalizados.length, noPrazo, atraso,
@@ -1234,7 +1243,7 @@ function entregaTimestamp(r){ return r.deliveredDate || r.evDelivered || null; }
 function computeFlow(deliveryArr, deliveryArrVtex, from, to){
   const sep=[], col=[], ent=[];
   for (const r of (deliveryArrVtex||deliveryArr)){
-    if (r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to)) sep.push(diffMinutes(r.vtexLastChange, r.vtexCreation));
+    if (r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to) && sameCalendarDay(r.vtexCreation, r.vtexLastChange)) sep.push(diffMinutes(r.vtexLastChange, r.vtexCreation));
   }
   for (const r of deliveryArr){
     const c = coletaTimestamp(r);
@@ -2027,7 +2036,7 @@ function exportSeparacao(scope){
   const arr = scope==='TAKEOUT' ? filtered : filtered.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
   const sepFn = scope==='TAKEOUT'
     ? (r => (isSepElegivelRetirada(r, f.from, f.to) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
-    : (r => (r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, f.from, f.to)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
+    : (r => (r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, f.from, f.to) && sameCalendarDay(r.vtexCreation, r.vtexLastChange)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
   const grouped = buildSeparacaoPorFilial(arr, sepFn);
   if (!grouped.length){ alert('Nenhum pedido no filtro atual.'); return; }
   const rows = grouped.map(g => ({
