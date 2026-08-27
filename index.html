@@ -2534,6 +2534,11 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
   const sepFrom = new Date(y, mo, 1, 0, 0, 0);
   const sepTo = new Date(y, mo+1, 1, 0, 0, 0);
   const scopeLabel = fechScopeLabel(scopeType, scopeVal);
+  // Com o relatório já recortado num único coordenador, agrupar os rankings
+  // por coordenador dá uma linha só (o próprio coordenador) — sem utilidade.
+  // Nesse caso quebra por filial, que é o nível que sobra pra comparar.
+  const rankGroupBy = scopeType==='coordenador' ? 'filial' : 'coordenador';
+  const rankGroupLabel = rankGroupBy==='filial' ? 'Filial' : 'Coordenador';
   let monthName = new Date(y, mo, 1).toLocaleDateString('pt-BR', { month:'long' });
   monthName = monthName.charAt(0).toUpperCase() + monthName.slice(1);
   const now = new Date();
@@ -2556,18 +2561,18 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
       fechKpiHtml('🎯','#dcedfb','Taxa de finalizados', fmtPct(m.taxaFinalizados), null, '#0d5fa3'),
     ].join('');
 
-    const atrasoRank = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>r.status==='SUCCESSFUL' && r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
-    const semAndamentoRank = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
-    const sepRankCoord = rankByGroup(rapidaArr, 'coordenador', items => avgSep(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+    const atrasoRank = rankByGroup(rowsScoped, rankGroupBy, items => items.filter(r=>r.status==='SUCCESSFUL' && r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
+    const semAndamentoRank = rankByGroup(rowsScoped, rankGroupBy, items => items.filter(r=>INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
+    const sepRankCoord = rankByGroup(rapidaArr, rankGroupBy, items => avgSep(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
     const sepRankFilial = rankByGroup(rapidaArr, 'filial', items => avgSep(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
 
     panelsHtml = `
       <div class="fech-col" style="flex:1.1">
-        ${fechTableHtml('Pedidos em atraso','Coordenador','Qtd', atrasoRank, v=>fmtInt(v))}
-        ${fechTableHtml('Pedidos sem andamento (despachados)','Coordenador','Qtd', semAndamentoRank, v=>fmtInt(v))}
+        ${fechTableHtml('Pedidos em atraso',rankGroupLabel,'Qtd', atrasoRank, v=>fmtInt(v))}
+        ${fechTableHtml('Pedidos sem andamento (despachados)',rankGroupLabel,'Qtd', semAndamentoRank, v=>fmtInt(v))}
       </div>
       <div class="fech-col" style="flex:1.1">
-        ${fechTableHtml('Piores médias de separação — Entrega Rápida','Coordenador','Separação', sepRankCoord, v=>fmtMinutes(v))}
+        ${fechTableHtml('Piores médias de separação — Entrega Rápida',rankGroupLabel,'Separação', sepRankCoord, v=>fmtMinutes(v))}
         ${fechChartHtml(computeSuspicious(rowsScoped))}
       </div>`;
     diagBullets = fechDiagnosticoEntrega(m, rowsScoped, sepRankFilial, semAndamentoRank, scopeLabel);
@@ -2582,13 +2587,13 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
       fechKpiHtml('📋', m.abertosMais7>0?'#fbdbdc':'#dcedfb','Pedidos em aberto', fmtInt(m.abertosMais7), `+7 dias · ${fmtInt(m.abertos)} em aberto no total`, m.abertosMais7>0?'#c40d16':'#1E2761'),
     ].join('');
 
-    const sepRankCoord = rankByGroup(rowsScoped, 'coordenador', items => avgSepRetirada(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
-    const abertoRankCoord = rankByGroup(rowsScoped, 'coordenador', items => items.filter(r=>isAbertoMais7(r, now)).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
+    const sepRankCoord = rankByGroup(rowsScoped, rankGroupBy, items => avgSepRetirada(items, sepFrom, sepTo)).filter(g=>g.value!=null).sort((a,b)=>b.value-a.value).slice(0,6);
+    const abertoRankCoord = rankByGroup(rowsScoped, rankGroupBy, items => items.filter(r=>isAbertoMais7(r, now)).length).filter(g=>g.value>0).sort((a,b)=>b.value-a.value).slice(0,6);
 
     panelsHtml = `
       <div class="fech-col" style="flex:1.2">
-        ${fechTableHtml('Piores médias de separação — Retirada','Coordenador','Separação', sepRankCoord, v=>fmtMinutes(v))}
-        ${fechTableHtml('Pedidos em aberto (+7 dias · por coordenador)','Coordenador','Qtd', abertoRankCoord, v=>fmtInt(v))}
+        ${fechTableHtml('Piores médias de separação — Retirada',rankGroupLabel,'Separação', sepRankCoord, v=>fmtMinutes(v))}
+        ${fechTableHtml(`Pedidos em aberto (+7 dias · por ${rankGroupLabel.toLowerCase()})`,rankGroupLabel,'Qtd', abertoRankCoord, v=>fmtInt(v))}
       </div>`;
     diagBullets = fechDiagnosticoRetirada(m, scopeLabel);
   }
