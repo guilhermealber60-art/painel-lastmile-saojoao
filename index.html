@@ -991,8 +991,11 @@ function buildJoined(){
     const createdAtAbbiamo = parseAnyDate(o.createdAt);
     const promisedDate = parseAnyDate(o.promised);
     const deliveredDate = parseAnyDate(o.delivered);
-    const vtexCreation = rep ? parseISODate(rep.creation) : null;
-    const vtexLastChange = rep ? parseISODate(rep.lastChange) : null;
+    // Reports do VTEX de épocas diferentes vêm com formato de data diferente
+    // (ex.: exports antigos em "dd/mm/aaaa hh:mm" em vez de ISO com "Z") —
+    // parseAnyDate aceita os dois, igual já fazia pras datas da Abbiamo.
+    const vtexCreation = rep ? parseAnyDate(rep.creation) : null;
+    const vtexLastChange = rep ? parseAnyDate(rep.lastChange) : null;
     const promisedMinutes = (promisedDate && createdAtAbbiamo) ? diffMinutes(promisedDate, createdAtAbbiamo) : (rep ? parseDeadlineToMinutes(rep.deadline) : null);
     const temControlado = !!(rep && rep.prods && rep.prods.some(p => controlSet.has(p)));
     const courrierClean = rep ? repairMojibake(rep.courrier) : null;
@@ -1559,7 +1562,7 @@ function computeForaCobertura(){
     const sk = (rep.seller || '').trim();
     if (!sk) continue;
     if (/retirada em loja/i.test(rep.courrier || '')) continue;
-    const creation = parseISODate(rep.creation);
+    const creation = parseAnyDate(rep.creation);
     if (f.from && (!creation || creation < f.from)) continue;
     if (f.to && (!creation || creation > f.to)) continue;
     const key = normCod(sellerNameToCod(sk));
