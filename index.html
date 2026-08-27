@@ -1996,7 +1996,7 @@ function exportPedidos(scope){
   const rows = filtered.map(r => {
     const coleta = coletaTimestamp(r);
     const entrega = entregaTimestamp(r);
-    const tempoSeparacao = (r.vtexLastChange && r.vtexCreation) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null;
+    const tempoSeparacao = (r.vtexLastChange && r.vtexCreation && sameCalendarDay(r.vtexCreation, r.vtexLastChange)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null;
     const tempoColeta = (coleta && r.createdAtAbbiamo) ? diffMinutes(coleta, r.createdAtAbbiamo) : null;
     const tempoEntrega = (entrega && coleta) ? diffMinutes(entrega, coleta) : null;
     return {
