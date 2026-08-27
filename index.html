@@ -1010,7 +1010,7 @@ function buildJoined(){
       vtexCreation, vtexLastChange, courrier:courrierClean, modalidade, temControlado,
       valor:(rep && rep.value!=null) ? rep.value : null,
       diretor:gestor?gestor.diretor:'', distrital:gestor?gestor.distrital:'', coordenador:gestor?gestor.coordenador:'',
-      regional:gestor?gestor.regional:'', uf:gestor?gestor.uf:'',
+      regional:gestor?gestor.coordenador:'', uf:gestor?gestor.uf:'', microRegiao:gestor?gestor.regional:'',
       filial:gestor?gestor.filial:(o.stn||o.sid),
     });
   }
@@ -1969,7 +1969,7 @@ function buildSeparacaoPorFilial(arr, sepFn){
     if (!byFilial.has(key)){
       byFilial.set(key, {
         filial:r.filial || r.sellerId, cod:r.sellerId, diretor:r.diretor,
-        distrital:r.distrital, coordenador:r.coordenador, uf:r.uf, regional:r.regional, vals:[],
+        distrital:r.distrital, coordenador:r.coordenador, uf:r.uf, microRegiao:r.microRegiao, vals:[],
       });
     }
     const v = sepFn(r);
@@ -1997,7 +1997,7 @@ function exportSeparacao(scope){
     'Distrital': g.distrital,
     'Coordenador': g.coordenador,
     'UF': g.uf,
-    'Micro Região': g.regional,
+    'Micro Região': g.microRegiao,
   }));
   const suffix = scope==='TAKEOUT' ? 'retirada' : 'entrega';
   exportRowsXlsx(rows, `separacao-${suffix}-${todayStr()}.xlsx`, 'Separação');
