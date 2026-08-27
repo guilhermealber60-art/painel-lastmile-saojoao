@@ -396,6 +396,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <h2>Retirada em loja <span class="badge-count" id="retiradaCount">0</span></h2>
       <span class="sub">order_type = TAKEOUT</span>
       <div class="panel-actions">
+        <button class="iconbtn" id="btnExportSepRetirada">Exportar planilha de separação</button>
         <button class="iconbtn" id="btnToggleRetirada">Ocultar</button>
       </div>
     </div>
@@ -429,6 +430,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <h2>Entrega <span class="badge-count" id="entregaCount">0</span></h2>
       <span class="sub">order_type = DELIVERY</span>
       <div class="panel-actions">
+        <button class="iconbtn" id="btnExportSepEntrega">Exportar planilha de separação</button>
         <button class="iconbtn" id="btnToggleEntrega">Ocultar</button>
       </div>
     </div>
@@ -793,6 +795,14 @@ function fmtHHMM(min){
   const h = Math.floor(abs/60), m = abs%60;
   return sign+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 }
+/* HH:MM:SS — usado na planilha de separação (mesmo padrão da exportação manual). */
+function fmtHHMMSS(min){
+  if (min==null || !isFinite(min)) return '';
+  const sign = min<0 ? '-' : '';
+  const totalSec = Math.round(Math.abs(min)*60);
+  const h = Math.floor(totalSec/3600), m = Math.floor((totalSec%3600)/60), s = totalSec%60;
+  return sign+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
 function fmtPct(x){ return (x==null || !isFinite(x)) ? '—' : (x*100).toFixed(1)+'%'; }
 function fmtInt(x){ return (x==null) ? '0' : x.toLocaleString('pt-BR'); }
 function fmtMoney(x){ return (x==null || !isFinite(x)) ? '—' : x.toLocaleString('pt-BR', { style:'currency', currency:'BRL' }); }
@@ -944,20 +954,21 @@ function pickReportValue(r){
    campos por linha; a agregação por pedido (juntando os códigos de produto) é
    feita em dedupeReportByOrder. */
 function pickReportRawFields(r){
-  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'], seller:pickReportSeller(r), seq:pickReportSequence(r), value:pickReportValue(r) };
+  return { order:String(r.Order||'').trim(), creation:r['Creation Date'], lastChange:r['Last Change Date'], courrier:r.Courrier, slaType:r['SLA Type'], deadline:r['Delivery Deadline'], seller:pickReportSeller(r), seq:pickReportSequence(r), value:pickReportValue(r) };
 }
 function dedupeReportByOrder(rows){
   const m = new Map();
   for (const r of rows){
     let entry = m.get(r.order);
     if (!entry){
-      entry = { order:r.order, creation:r.creation, courrier:r.courrier, slaType:r.slaType, deadline:r.deadline, seller:r.seller, value:(r.value!=null?r.value:null), prods:new Set() };
+      entry = { order:r.order, creation:r.creation, lastChange:r.lastChange, courrier:r.courrier, slaType:r.slaType, deadline:r.deadline, seller:r.seller, value:(r.value!=null?r.value:null), prods:new Set() };
       m.set(r.order, entry);
     }
     if (entry.value==null && r.value!=null) entry.value = r.value;
+    if (!entry.lastChange && r.lastChange) entry.lastChange = r.lastChange;
     if (r.seq) entry.prods.add(r.seq);
   }
-  return [...m.values()].map(e => ({ order:e.order, creation:e.creation, courrier:e.courrier, slaType:e.slaType, deadline:e.deadline, seller:e.seller, value:e.value, prods:[...e.prods] }));
+  return [...m.values()].map(e => ({ order:e.order, creation:e.creation, lastChange:e.lastChange, courrier:e.courrier, slaType:e.slaType, deadline:e.deadline, seller:e.seller, value:e.value, prods:[...e.prods] }));
 }
 function mergeByKey(existing, incoming, keyFn){
   const m = new Map(existing.map(r => [keyFn(r), r]));
@@ -981,6 +992,7 @@ function buildJoined(){
     const promisedDate = parseAnyDate(o.promised);
     const deliveredDate = parseAnyDate(o.delivered);
     const vtexCreation = rep ? parseISODate(rep.creation) : null;
+    const vtexLastChange = rep ? parseISODate(rep.lastChange) : null;
     const promisedMinutes = (promisedDate && createdAtAbbiamo) ? diffMinutes(promisedDate, createdAtAbbiamo) : (rep ? parseDeadlineToMinutes(rep.deadline) : null);
     const temControlado = !!(rep && rep.prods && rep.prods.some(p => controlSet.has(p)));
     const courrierClean = rep ? repairMojibake(rep.courrier) : null;
@@ -995,10 +1007,10 @@ function buildJoined(){
       createdAtAbbiamo, promisedDate, deliveredDate,
       evDispatched:parseAnyDate(o.evDispatched), evInTransit:parseAnyDate(o.evInTransit),
       evCollected:parseAnyDate(o.evCollected), evDelivered:parseAnyDate(o.evDelivered),
-      vtexCreation, courrier:courrierClean, modalidade, temControlado,
+      vtexCreation, vtexLastChange, courrier:courrierClean, modalidade, temControlado,
       valor:(rep && rep.value!=null) ? rep.value : null,
       diretor:gestor?gestor.diretor:'', distrital:gestor?gestor.distrital:'', coordenador:gestor?gestor.coordenador:'',
-      regional:gestor?gestor.coordenador:'', uf:gestor?gestor.uf:'',
+      regional:gestor?gestor.regional:'', uf:gestor?gestor.uf:'',
       filial:gestor?gestor.filial:(o.stn||o.sid),
     });
   }
@@ -1060,7 +1072,7 @@ function isSepElegivelRetirada(r){
   return true;
 }
 function avgSepRetirada(items){
-  const v = items.filter(r => isSepElegivelRetirada(r) && r.createdAtAbbiamo).map(r => diffMinutes(r.createdAtAbbiamo, r.vtexCreation));
+  const v = items.filter(r => isSepElegivelRetirada(r) && r.vtexLastChange).map(r => diffMinutes(r.vtexLastChange, r.vtexCreation));
   return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
 }
 
@@ -1130,7 +1142,7 @@ function renderRankSection(o){
   }));
 }
 function avgSep(items){
-  const v = items.filter(r=>r.createdAtAbbiamo && r.vtexCreation).map(r=>diffMinutes(r.createdAtAbbiamo,r.vtexCreation));
+  const v = items.filter(r=>r.vtexLastChange && r.vtexCreation).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
 }
 
@@ -1144,7 +1156,7 @@ function computeEntregaGroup(arr){
   const noPrazo = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate>=r.deliveredDate).length;
   const atraso = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length;
   const semAndamento = arr.filter(r => INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length;
-  const sepVals = arr.filter(r=>r.createdAtAbbiamo && r.vtexCreation).map(r=>diffMinutes(r.createdAtAbbiamo,r.vtexCreation));
+  const sepVals = arr.filter(r=>r.vtexLastChange && r.vtexCreation).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   const medSep = sepVals.length ? sepVals.reduce((a,b)=>a+b,0)/sepVals.length : null;
   return {
     total, finalizados: finalizados.length, noPrazo, atraso,
@@ -1186,7 +1198,7 @@ function entregaTimestamp(r){ return r.deliveredDate || r.evDelivered || null; }
 function computeFlow(deliveryArr){
   const sep=[], col=[], ent=[];
   for (const r of deliveryArr){
-    if (r.createdAtAbbiamo && r.vtexCreation) sep.push(diffMinutes(r.createdAtAbbiamo, r.vtexCreation));
+    if (r.vtexLastChange && r.vtexCreation) sep.push(diffMinutes(r.vtexLastChange, r.vtexCreation));
     const c = coletaTimestamp(r);
     if (c && r.createdAtAbbiamo) col.push(diffMinutes(c, r.createdAtAbbiamo));
     const e = entregaTimestamp(r);
@@ -1934,7 +1946,7 @@ function exportPedidos(scope){
   const rows = filtered.map(r => {
     const coleta = coletaTimestamp(r);
     const entrega = entregaTimestamp(r);
-    const tempoSeparacao = (r.createdAtAbbiamo && r.vtexCreation) ? diffMinutes(r.createdAtAbbiamo, r.vtexCreation) : null;
+    const tempoSeparacao = (r.vtexLastChange && r.vtexCreation) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null;
     const tempoColeta = (coleta && r.createdAtAbbiamo) ? diffMinutes(coleta, r.createdAtAbbiamo) : null;
     const tempoEntrega = (entrega && coleta) ? diffMinutes(entrega, coleta) : null;
     return {
@@ -1945,6 +1957,50 @@ function exportPedidos(scope){
   });
   const suffix = scope==='DELIVERY' ? 'entrega' : scope==='TAKEOUT' ? 'retirada' : 'todos';
   exportRowsXlsx(rows, `pedidos-${suffix}-${todayStr()}.xlsx`, 'Pedidos');
+}
+
+/* Planilha de separação por filial — mesmo layout do modelo de referência:
+   Filial | Média separação (HH:MM:SS) | Qtd pedidos | Cód loja | Diretor |
+   Distrital | Coordenador | UF | Micro Região. */
+function buildSeparacaoPorFilial(arr, sepFn){
+  const byFilial = new Map();
+  for (const r of arr){
+    const key = r.sellerId;
+    if (!byFilial.has(key)){
+      byFilial.set(key, {
+        filial:r.filial || r.sellerId, cod:r.sellerId, diretor:r.diretor,
+        distrital:r.distrital, coordenador:r.coordenador, uf:r.uf, regional:r.regional, vals:[],
+      });
+    }
+    const v = sepFn(r);
+    if (v!=null) byFilial.get(key).vals.push(v);
+  }
+  return [...byFilial.values()]
+    .filter(g => g.vals.length>0)
+    .map(g => ({ ...g, avg: g.vals.reduce((a,b)=>a+b,0)/g.vals.length, qtd: g.vals.length }))
+    .sort((a,b) => a.filial.localeCompare(b.filial, 'pt-BR'));
+}
+function exportSeparacao(scope){
+  const filtered = applyFilters().filter(r => r.orderType===scope);
+  const arr = scope==='TAKEOUT' ? filtered : filtered.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
+  const sepFn = scope==='TAKEOUT'
+    ? (r => (isSepElegivelRetirada(r) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
+    : (r => (r.vtexLastChange && r.vtexCreation) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
+  const grouped = buildSeparacaoPorFilial(arr, sepFn);
+  if (!grouped.length){ alert('Nenhum pedido no filtro atual.'); return; }
+  const rows = grouped.map(g => ({
+    'Filial': g.filial,
+    'Média separação': fmtHHMMSS(g.avg),
+    'Qtd pedidos': g.qtd,
+    'Cód loja': g.cod,
+    'Diretor': g.diretor,
+    'Distrital': g.distrital,
+    'Coordenador': g.coordenador,
+    'UF': g.uf,
+    'Micro Região': g.regional,
+  }));
+  const suffix = scope==='TAKEOUT' ? 'retirada' : 'entrega';
+  exportRowsXlsx(rows, `separacao-${suffix}-${todayStr()}.xlsx`, 'Separação');
 }
 
 function exportCobertura(){
@@ -1968,6 +2024,8 @@ function exportCobertura(){
   exportRowsXlsx(rows, `cobertura-modalidades-${todayStr()}.xlsx`, 'Cobertura');
 }
 document.getElementById('btnExportCobertura').onclick = () => exportCobertura();
+document.getElementById('btnExportSepRetirada').onclick = () => exportSeparacao('TAKEOUT');
+document.getElementById('btnExportSepEntrega').onclick = () => exportSeparacao('DELIVERY');
 
 const exportMenuEl = document.getElementById('exportMenu');
 document.getElementById('btnExportPedidos').onclick = (e) => {
