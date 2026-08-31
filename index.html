@@ -757,6 +757,9 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
         <button type="button" data-tipo="retirada" class="active">Retirada em Loja</button>
         <button type="button" data-tipo="entrega">Entrega</button>
       </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:600;font-size:12px;color:var(--ink-2);cursor:pointer">
+        <input type="checkbox" id="distTipoAmbos"> Gerar os dois tipos (Retirada + Entrega)
+      </label>
     </div>
     <div class="field-row">
       <label>Distrital</label>
@@ -2970,17 +2973,29 @@ function distPlannedScopeVals(){
   const v = document.getElementById('distScopeVal').value;
   return v ? [v] : [];
 }
-function updateDistCountHint(){
+/* Monta a lista de combinações (tipo × Distrital) a gerar, conforme o
+   checkbox "gerar os dois tipos" e o escopo escolhido (1 distrital ou todos). */
+function distPlannedCombos(){
+  const tipos = document.getElementById('distTipoAmbos').checked ? ['retirada','entrega'] : [distTipoAtual];
   const vals = distPlannedScopeVals();
+  const combos = [];
+  for (const tipo of tipos) for (const distritalVal of vals) combos.push({ tipo, distritalVal });
+  return combos;
+}
+function updateDistCountHint(){
+  const combos = distPlannedCombos();
   const hint = document.getElementById('distCountHint');
-  hint.textContent = vals.length > 1
-    ? `Serão geradas ${vals.length} planilhas e ${vals.length} imagens (baixadas uma a uma).`
-    : vals.length===1 ? '1 planilha e 1 imagem serão geradas.' : 'Escolha um Distrital (ou marque "gerar para todos").';
+  hint.textContent = combos.length > 1
+    ? `Serão geradas ${combos.length} planilhas e ${combos.length} imagens (baixadas uma a uma).`
+    : combos.length===1 ? '1 planilha e 1 imagem serão geradas.' : 'Escolha um Distrital (ou marque "gerar para todos").';
 }
 document.getElementById('btnOpenDistrital').onclick = () => {
   if (!state.joined.length){ showToast('Carregue os dados primeiro.', 'error'); return; }
   distTipoAtual = 'retirada';
   document.querySelectorAll('#distTipoToggle button').forEach(b => b.classList.toggle('active', b.dataset.tipo==='retirada'));
+  document.getElementById('distTipoAmbos').checked = false;
+  document.getElementById('distTipoToggle').style.opacity = 1;
+  document.getElementById('distTipoToggle').style.pointerEvents = '';
   const opts = distScopeOptions();
   document.getElementById('distScopeVal').innerHTML = opts.length ? opts.map(o=>`<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('') : '<option value="">Sem opções</option>';
   document.getElementById('distScopeVal').disabled = false;
@@ -2994,7 +3009,13 @@ document.getElementById('distTipoToggle').addEventListener('click', e => {
   const btn = e.target.closest('button[data-tipo]'); if (!btn) return;
   distTipoAtual = btn.dataset.tipo;
   document.querySelectorAll('#distTipoToggle button').forEach(b => b.classList.toggle('active', b===btn));
+  updateDistCountHint();
 });
+document.getElementById('distTipoAmbos').onchange = (e) => {
+  document.getElementById('distTipoToggle').style.opacity = e.target.checked ? .45 : 1;
+  document.getElementById('distTipoToggle').style.pointerEvents = e.target.checked ? 'none' : '';
+  updateDistCountHint();
+};
 document.getElementById('distScopeVal').onchange = updateDistCountHint;
 document.getElementById('distScopeTodos').onchange = (e) => {
   document.getElementById('distScopeVal').disabled = e.target.checked;
@@ -3002,8 +3023,8 @@ document.getElementById('distScopeTodos').onchange = (e) => {
   updateDistCountHint();
 };
 document.getElementById('btnGerarDistrital').onclick = async () => {
-  const vals = distPlannedScopeVals();
-  if (!vals.length){ showToast('Escolha um Distrital (ou marque "gerar para todos").', 'error'); return; }
+  const combos = distPlannedCombos();
+  if (!combos.length){ showToast('Escolha um Distrital (ou marque "gerar para todos").', 'error'); return; }
 
   const holder = document.createElement('div');
   holder.style.position = 'fixed'; holder.style.left = '-99999px'; holder.style.top = '0';
@@ -3011,27 +3032,27 @@ document.getElementById('btnGerarDistrital').onclick = async () => {
   const btn = document.getElementById('btnGerarDistrital');
   btn.disabled = true;
   let ok = 0, fail = 0;
-  for (let i=0; i<vals.length; i++){
-    const distritalVal = vals[i];
-    showToast(vals.length>1 ? `Gerando ${i+1} de ${vals.length}…` : 'Gerando…');
+  for (let i=0; i<combos.length; i++){
+    const { tipo, distritalVal } = combos[i];
+    showToast(combos.length>1 ? `Gerando ${i+1} de ${combos.length}…` : 'Gerando…');
     try{
-      const sheetRows = buildDistritalSheetRows(distTipoAtual, distritalVal);
-      const html = buildDistritalImageHtml(distTipoAtual, distritalVal);
+      const sheetRows = buildDistritalSheetRows(tipo, distritalVal);
+      const html = buildDistritalImageHtml(tipo, distritalVal);
       if (!sheetRows.length || !html) throw new Error('Sem dados suficientes para esse Distrital.');
       const slug = distritalVal.replace(/[^\w-]+/g,'_');
-      exportRowsXlsx(sheetRows, `distrital-${distTipoAtual}-${slug}-${todayStr()}.xlsx`, 'Distrital');
+      exportRowsXlsx(sheetRows, `distrital-${tipo}-${slug}-${todayStr()}.xlsx`, 'Distrital');
       holder.innerHTML = html;
       const el = holder.querySelector('.dist-report');
       const canvas = await html2canvas(el, { scale:2, backgroundColor:'#0b1440' });
       const a = document.createElement('a');
-      a.download = `distrital-${distTipoAtual}-${slug}-${todayStr()}.png`;
+      a.download = `distrital-${tipo}-${slug}-${todayStr()}.png`;
       a.href = canvas.toDataURL('image/png');
       a.click();
       ok++;
       await new Promise(r => setTimeout(r, 500));
     } catch(err){
       fail++;
-      console.error('[distrital]', distritalVal, err);
+      console.error('[distrital]', tipo, distritalVal, err);
     }
   }
   document.body.removeChild(holder);
