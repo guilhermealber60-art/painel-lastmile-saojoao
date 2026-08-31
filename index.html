@@ -302,6 +302,27 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 
 .fech-foot{display:flex; justify-content:flex-end; margin-top:16px}
 .fech-foot-badge{background:#1E2761; color:#fff; font-size:12px; font-weight:800; padding:8px 20px; border-radius:9px}
+
+/* ===================== RELATÓRIO DIÁRIO POR DISTRITAL (imagem) =====================
+   Tema escuro fixo (não herda claro/escuro do app) — layout tipo "planilha",
+   cabeçalho + linha de destaque (Rede Geral) + uma linha por Distrital. */
+.dist-report{width:900px; background:#0b1440; border-radius:16px; padding:24px 28px; box-sizing:border-box; font-family:'Inter',sans-serif}
+.dist-report .dist-title{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; gap:12px}
+.dist-report .dist-title h3{margin:0; font-family:'Archivo',sans-serif; font-size:17px; font-weight:800; color:#fff}
+.dist-report .dist-title .dist-sub{font-size:11.5px; color:#93a0d9; font-weight:600; margin-top:3px}
+.dist-report .dist-title img{height:32px; display:block}
+.dist-report table{width:100%; border-collapse:collapse}
+.dist-report thead th{font-size:10.5px; text-transform:uppercase; letter-spacing:.3px; color:#93a0d9; font-weight:800; padding:9px 10px; text-align:center; border-bottom:2px solid #253166}
+.dist-report thead th:first-child{text-align:left}
+.dist-report tbody td{padding:10px 10px; font-size:12.5px; font-weight:700; color:#e7ebff; text-align:center; border-bottom:1px solid #1a2352}
+.dist-report tbody td:first-child{text-align:left; color:#fff; font-weight:800}
+.dist-report tbody td.mono{font-family:'JetBrains Mono',monospace}
+.dist-report tbody tr.dist-highlight td{background:#1E2761}
+.dist-report tbody tr:last-child td{border-bottom:0}
+.dist-report .var-badge{display:inline-block; padding:3px 12px; border-radius:20px; font-size:11px; font-weight:800}
+.dist-report .var-badge.var-up{color:#c40d16; background:#fbdbdc}
+.dist-report .var-badge.var-down{color:#137a38; background:#d7f2df}
+.dist-report .var-badge.var-flat{color:#5b6284; background:#1a2352}
 </style>
 </head>
 <body>
@@ -328,6 +349,8 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <button data-scope="TAKEOUT">Só Retirada</button>
     </div>
   </div>
+  <button class="topbtn" id="btnOpenExportSep">Exportar planilha de separação</button>
+  <button class="topbtn" id="btnOpenDistrital">Relatório diário — Distrital</button>
   <button class="topbtn" id="btnOpenFechamento">Fechamento operacional</button>
   <button class="topbtn" id="btnOpenUpdate">Atualizar dados</button>
   <button class="topbtn" id="btnPublish">Publicar (snapshot)</button>
@@ -396,7 +419,6 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <h2>Retirada em loja <span class="badge-count" id="retiradaCount">0</span></h2>
       <span class="sub">order_type = TAKEOUT</span>
       <div class="panel-actions">
-        <button class="iconbtn" id="btnExportSepRetirada">Exportar planilha de separação</button>
         <button class="iconbtn" id="btnToggleRetirada">Ocultar</button>
       </div>
     </div>
@@ -430,7 +452,6 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <h2>Entrega <span class="badge-count" id="entregaCount">0</span></h2>
       <span class="sub">order_type = DELIVERY</span>
       <div class="panel-actions">
-        <button class="iconbtn" id="btnExportSepEntrega">Exportar planilha de separação</button>
         <button class="iconbtn" id="btnToggleEntrega">Ocultar</button>
       </div>
     </div>
@@ -697,6 +718,49 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
   <div class="dlg-foot">
     <button class="btn btn-ghost" data-close>Cancelar</button>
     <button class="btn btn-primary" id="btnGerarFechamento">Gerar imagem</button>
+  </div>
+</dialog>
+
+<dialog id="dlgExportSep" style="width:min(420px,92vw)">
+  <div class="dlg-head"><h3>Exportar planilha de separação</h3><button data-close>×</button></div>
+  <div class="dlg-body">
+    <p style="font-size:11.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6">
+      Exporta a média de separação por filial (respeitando os filtros ativos na tela). Escolha se quer só a Retirada,
+      só a Entrega, ou as duas juntas (nesse caso o arquivo sai com duas abas).
+    </p>
+    <div class="field-row">
+      <label>Escopo</label>
+      <div class="modtable-toggle" id="expSepToggle">
+        <button type="button" data-scope="TAKEOUT" class="active">Só Retirada</button>
+        <button type="button" data-scope="DELIVERY">Só Entrega</button>
+        <button type="button" data-scope="AMBAS">Ambas juntas</button>
+      </div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn btn-ghost" data-close>Cancelar</button>
+    <button class="btn btn-primary" id="btnGerarExportSep">Exportar</button>
+  </div>
+</dialog>
+
+<dialog id="dlgDistrital" style="width:min(420px,92vw)">
+  <div class="dlg-head"><h3>Relatório diário — Distrital (imagem)</h3><button data-close>×</button></div>
+  <div class="dlg-body">
+    <p style="font-size:11.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6">
+      Gera uma imagem com a média de separação de cada Distrital: dia mais recente disponível, acumulado do mês e a
+      variação em relação ao dia anterior — independe dos filtros ativos na tela.
+    </p>
+    <div class="field-row">
+      <label>Tipo</label>
+      <div class="modtable-toggle" id="distTipoToggle">
+        <button type="button" data-tipo="retirada" class="active">Retirada em Loja</button>
+        <button type="button" data-tipo="entrega">Entrega</button>
+      </div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn btn-ghost" data-close>Cancelar</button>
+    <button class="btn btn-primary" id="btnGerarDistrital">Gerar imagem</button>
   </div>
 </dialog>
 
@@ -2030,7 +2094,7 @@ function buildSeparacaoPorFilial(arr, sepFn){
     .map(g => ({ ...g, avg: g.vals.reduce((a,b)=>a+b,0)/g.vals.length, qtd: g.vals.length }))
     .sort((a,b) => a.filial.localeCompare(b.filial, 'pt-BR'));
 }
-function exportSeparacao(scope){
+function buildSeparacaoRows(scope){
   const f = state.filters;
   const filtered = applyFiltersVtex().filter(r => r.orderType===scope);
   const arr = scope==='TAKEOUT' ? filtered : filtered.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
@@ -2038,8 +2102,7 @@ function exportSeparacao(scope){
     ? (r => (isSepElegivelRetirada(r, f.from, f.to) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
     : (r => (r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, f.from, f.to) && sameCalendarDay(r.vtexCreation, r.vtexLastChange)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
   const grouped = buildSeparacaoPorFilial(arr, sepFn);
-  if (!grouped.length){ alert('Nenhum pedido no filtro atual.'); return; }
-  const rows = grouped.map(g => ({
+  return grouped.map(g => ({
     'Filial': g.filial,
     'Média separação': fmtHHMMSS(g.avg),
     'Qtd pedidos': g.qtd,
@@ -2050,7 +2113,30 @@ function exportSeparacao(scope){
     'UF': g.uf,
     'Micro Região': g.microRegiao,
   }));
-  const suffix = scope==='TAKEOUT' ? 'retirada' : 'entrega';
+}
+function exportRowsXlsxMulti(sheets, filename){
+  const wb = XLSX.utils.book_new();
+  for (const s of sheets){
+    const ws = XLSX.utils.json_to_sheet(s.rows);
+    XLSX.utils.book_append_sheet(wb, ws, s.name);
+  }
+  XLSX.writeFile(wb, filename);
+}
+/* mode: 'TAKEOUT' | 'DELIVERY' | 'AMBAS' — escolhido no diálogo dlgExportSep. */
+function exportSeparacaoEscolha(mode){
+  if (mode === 'AMBAS'){
+    const retRows = buildSeparacaoRows('TAKEOUT');
+    const entRows = buildSeparacaoRows('DELIVERY');
+    if (!retRows.length && !entRows.length){ showToast('Nenhum pedido no filtro atual.', 'error'); return; }
+    exportRowsXlsxMulti([
+      { name:'Separação Retirada', rows: retRows.length ? retRows : [{ 'Filial':'Sem pedidos no filtro atual' }] },
+      { name:'Separação Entrega', rows: entRows.length ? entRows : [{ 'Filial':'Sem pedidos no filtro atual' }] },
+    ], `separacao-ambas-${todayStr()}.xlsx`);
+    return;
+  }
+  const rows = buildSeparacaoRows(mode);
+  if (!rows.length){ showToast('Nenhum pedido no filtro atual.', 'error'); return; }
+  const suffix = mode==='TAKEOUT' ? 'retirada' : 'entrega';
   exportRowsXlsx(rows, `separacao-${suffix}-${todayStr()}.xlsx`, 'Separação');
 }
 
@@ -2075,8 +2161,25 @@ function exportCobertura(){
   exportRowsXlsx(rows, `cobertura-modalidades-${todayStr()}.xlsx`, 'Cobertura');
 }
 document.getElementById('btnExportCobertura').onclick = () => exportCobertura();
-document.getElementById('btnExportSepRetirada').onclick = () => exportSeparacao('TAKEOUT');
-document.getElementById('btnExportSepEntrega').onclick = () => exportSeparacao('DELIVERY');
+
+const dlgExportSep = document.getElementById('dlgExportSep');
+let expSepScopeAtual = 'TAKEOUT';
+document.getElementById('btnOpenExportSep').onclick = () => {
+  if (!state.joined.length){ showToast('Carregue os dados primeiro.', 'error'); return; }
+  expSepScopeAtual = 'TAKEOUT';
+  document.querySelectorAll('#expSepToggle button').forEach(b => b.classList.toggle('active', b.dataset.scope==='TAKEOUT'));
+  dlgExportSep.showModal();
+};
+dlgExportSep.querySelectorAll('[data-close]').forEach(b => b.onclick = () => dlgExportSep.close());
+document.getElementById('expSepToggle').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-scope]'); if (!btn) return;
+  expSepScopeAtual = btn.dataset.scope;
+  document.querySelectorAll('#expSepToggle button').forEach(b => b.classList.toggle('active', b===btn));
+});
+document.getElementById('btnGerarExportSep').onclick = () => {
+  exportSeparacaoEscolha(expSepScopeAtual);
+  dlgExportSep.close();
+};
 
 const exportMenuEl = document.getElementById('exportMenu');
 document.getElementById('btnExportPedidos').onclick = (e) => {
@@ -2727,6 +2830,147 @@ document.getElementById('btnGerarFechamento').onclick = async () => {
   btn.disabled = false;
   showToast(fail ? `${ok} imagem(ns) gerada(s), ${fail} falharam (veja o console).` : `${ok} imagem(ns) gerada(s).`, fail ? 'error' : undefined);
   dlgFechamento.close();
+};
+
+/* =====================================================================
+   RELATÓRIO DIÁRIO POR DISTRITAL (imagem — acumulado do mês + variação vs dia anterior)
+===================================================================== */
+/* Agrega a média de separação (mesma regra usada no resto do painel, conforme
+   tipo, incluindo a regra de mesmo-dia-calendário) em 3 janelas: dia mais
+   recente com dados, dia anterior a esse, e acumulado do mês corrente (até o
+   dia mais recente). Ignora os filtros da tela de propósito — é sempre a rede
+   toda, como o Fechamento operacional. */
+function buildDistritalDiarioRows(tipo){
+  const wantType = tipo==='entrega' ? 'DELIVERY' : 'TAKEOUT';
+  const sepFn = tipo==='entrega'
+    ? (r => (r.vtexLastChange && r.vtexCreation && sameCalendarDay(r.vtexCreation, r.vtexLastChange) && RAPIDA_MODALIDADES.includes(r.modalidade)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
+    : (r => (isSepElegivelRetirada(r, null, null) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
+
+  const arr = state.joined.filter(r => r.orderType===wantType);
+  let maxDate = null;
+  for (const r of arr){
+    const d = r.vtexCreation || r.createdAtAbbiamo;
+    if (!d) continue;
+    if (!maxDate || d > maxDate) maxDate = d;
+  }
+  if (!maxDate) return null;
+
+  const dayStart = d => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+  const today0 = dayStart(maxDate);
+  const yest0 = today0 - 86400000;
+  const monthStart = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1).getTime();
+
+  const buckets = new Map();
+  function bucket(key, label){
+    if (!buckets.has(key)) buckets.set(key, { label, hoje:[], ontem:[], mes:[] });
+    return buckets.get(key);
+  }
+  for (const r of arr){
+    const d = r.vtexCreation || r.createdAtAbbiamo;
+    if (!d) continue;
+    const v = sepFn(r);
+    if (v==null) continue;
+    const dk = dayStart(d);
+    const inMonth = d.getTime() >= monthStart;
+    const distKey = r.distrital || '(sem distrital)';
+    for (const g of [bucket('__ALL__','Rede (Geral)'), bucket(distKey, distKey)]){
+      if (dk === today0) g.hoje.push(v);
+      if (dk === yest0) g.ontem.push(v);
+      if (inMonth) g.mes.push(v);
+    }
+  }
+  const avg = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+  const geralBucket = buckets.get('__ALL__');
+  buckets.delete('__ALL__');
+  const distList = [...buckets.values()]
+    .map(g => ({ label:g.label, hoje:avg(g.hoje), ontem:avg(g.ontem), mes:avg(g.mes) }))
+    .sort((a,b) => a.label.localeCompare(b.label, 'pt-BR'));
+  const geral = geralBucket ? { label:geralBucket.label, hoje:avg(geralBucket.hoje), ontem:avg(geralBucket.ontem), mes:avg(geralBucket.mes) } : null;
+  return { geral, distList, maxDate };
+}
+function distVariacaoInfo(hoje, ontem){
+  if (hoje==null || ontem==null) return { txt:'—', cls:'var-flat' };
+  if (hoje > ontem + 0.05) return { txt:'Aumentou', cls:'var-up' };
+  if (hoje < ontem - 0.05) return { txt:'Diminuiu', cls:'var-down' };
+  return { txt:'Estável', cls:'var-flat' };
+}
+function distRowHtml(r, highlight){
+  const v = distVariacaoInfo(r.hoje, r.ontem);
+  return `<tr class="${highlight?'dist-highlight':''}">
+    <td>${escapeHtml(r.label)}</td>
+    <td class="mono">${fmtHHMMSS(r.hoje)}</td>
+    <td class="mono">${fmtHHMMSS(r.mes)}</td>
+    <td><span class="var-badge ${v.cls}">${v.txt}</span></td>
+  </tr>`;
+}
+function buildDistritalImageHtml(tipo){
+  const data = buildDistritalDiarioRows(tipo);
+  if (!data) return null;
+  const { geral, distList, maxDate } = data;
+  let diaLabel = maxDate.toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'2-digit' });
+  diaLabel = diaLabel.charAt(0).toUpperCase() + diaLabel.slice(1);
+  const diaCurto = maxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
+  const tipoLabel = tipo==='entrega' ? 'Entrega' : 'Retirada em Loja';
+  const rowsHtml = (geral ? distRowHtml(geral, true) : '') + distList.map(r => distRowHtml(r, false)).join('');
+  return `<div class="dist-report">
+    <div class="dist-title">
+      <div>
+        <h3>Média de separação por Distrital — ${escapeHtml(tipoLabel)}</h3>
+        <div class="dist-sub">${escapeHtml(diaLabel)} · acumulado do mês e variação em relação ao dia anterior</div>
+      </div>
+      <img src="data:image/png;base64,${FECH_LOGO_B64}" alt="Farmácias São João">
+    </div>
+    <table>
+      <thead><tr>
+        <th>Distrital</th>
+        <th>${escapeHtml(diaCurto)}</th>
+        <th>Acumulado mês</th>
+        <th>Relação com o dia anterior</th>
+      </tr></thead>
+      <tbody>${rowsHtml || '<tr><td colspan="4" style="color:#93a0d9;padding:14px 6px;text-align:center">Sem dados suficientes para gerar o relatório.</td></tr>'}</tbody>
+    </table>
+  </div>`;
+}
+
+const dlgDistrital = document.getElementById('dlgDistrital');
+let distTipoAtual = 'retirada';
+document.getElementById('btnOpenDistrital').onclick = () => {
+  if (!state.joined.length){ showToast('Carregue os dados primeiro.', 'error'); return; }
+  distTipoAtual = 'retirada';
+  document.querySelectorAll('#distTipoToggle button').forEach(b => b.classList.toggle('active', b.dataset.tipo==='retirada'));
+  dlgDistrital.showModal();
+};
+dlgDistrital.querySelectorAll('[data-close]').forEach(b => b.onclick = () => dlgDistrital.close());
+document.getElementById('distTipoToggle').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-tipo]'); if (!btn) return;
+  distTipoAtual = btn.dataset.tipo;
+  document.querySelectorAll('#distTipoToggle button').forEach(b => b.classList.toggle('active', b===btn));
+});
+document.getElementById('btnGerarDistrital').onclick = async () => {
+  const html = buildDistritalImageHtml(distTipoAtual);
+  if (!html){ showToast('Sem dados para gerar a imagem.', 'error'); return; }
+  const holder = document.createElement('div');
+  holder.style.position = 'fixed'; holder.style.left = '-99999px'; holder.style.top = '0';
+  document.body.appendChild(holder);
+  const btn = document.getElementById('btnGerarDistrital');
+  btn.disabled = true;
+  try{
+    holder.innerHTML = html;
+    const el = holder.querySelector('.dist-report');
+    const canvas = await html2canvas(el, { scale:2, backgroundColor:'#0b1440' });
+    const a = document.createElement('a');
+    a.download = `distrital-${distTipoAtual}-${todayStr()}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    showToast('Imagem gerada.');
+    dlgDistrital.close();
+  } catch(err){
+    console.error('[distrital]', err);
+    showToast('Falha ao gerar imagem: ' + err.message, 'error');
+  } finally {
+    document.body.removeChild(holder);
+    btn.disabled = false;
+  }
 };
 
 /* =====================================================================
