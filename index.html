@@ -743,12 +743,13 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
   </div>
 </dialog>
 
-<dialog id="dlgDistrital" style="width:min(420px,92vw)">
-  <div class="dlg-head"><h3>Relatório diário — Distrital (imagem)</h3><button data-close>×</button></div>
+<dialog id="dlgDistrital" style="width:min(480px,92vw)">
+  <div class="dlg-head"><h3>Relatório diário por Distrital (planilha + imagem)</h3><button data-close>×</button></div>
   <div class="dlg-body">
     <p style="font-size:11.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6">
-      Gera uma imagem com a média de separação de cada Distrital: dia mais recente disponível, acumulado do mês e a
-      variação em relação ao dia anterior — independe dos filtros ativos na tela.
+      Gera, para o Distrital escolhido, uma planilha e uma imagem com a média de separação do Distrital e de cada um dos
+      seus Coordenadores: dia mais recente disponível, acumulado do mês e a variação em relação ao dia anterior —
+      independe dos filtros ativos na tela.
     </p>
     <div class="field-row">
       <label>Tipo</label>
@@ -757,10 +758,18 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
         <button type="button" data-tipo="entrega">Entrega</button>
       </div>
     </div>
+    <div class="field-row">
+      <label>Distrital</label>
+      <select id="distScopeVal"></select>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:600;font-size:12px;color:var(--ink-2);cursor:pointer">
+        <input type="checkbox" id="distScopeTodos"> Gerar para todos os distritais
+      </label>
+    </div>
+    <div class="hint" id="distCountHint" style="margin-top:2px"></div>
   </div>
   <div class="dlg-foot">
     <button class="btn btn-ghost" data-close>Cancelar</button>
-    <button class="btn btn-primary" id="btnGerarDistrital">Gerar imagem</button>
+    <button class="btn btn-primary" id="btnGerarDistrital">Gerar</button>
   </div>
 </dialog>
 
@@ -2838,15 +2847,10 @@ document.getElementById('btnGerarFechamento').onclick = async () => {
 /* Agrega a média de separação (mesma regra usada no resto do painel, conforme
    tipo, incluindo a regra de mesmo-dia-calendário) em 3 janelas: dia mais
    recente com dados, dia anterior a esse, e acumulado do mês corrente (até o
-   dia mais recente). Ignora os filtros da tela de propósito — é sempre a rede
-   toda, como o Fechamento operacional. */
-function buildDistritalDiarioRows(tipo){
-  const wantType = tipo==='entrega' ? 'DELIVERY' : 'TAKEOUT';
-  const sepFn = tipo==='entrega'
-    ? (r => (r.vtexLastChange && r.vtexCreation && sameCalendarDay(r.vtexCreation, r.vtexLastChange) && RAPIDA_MODALIDADES.includes(r.modalidade)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
-    : (r => (isSepElegivelRetirada(r, null, null) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
-
-  const arr = state.joined.filter(r => r.orderType===wantType);
+   dia mais recente) — dentro de um grupo (ex.: Coordenador) mais um total
+   agregado. Ignora os filtros da tela de propósito, igual ao Fechamento
+   operacional (tem seu próprio escopo, escolhido no diálogo). */
+function buildSeparacaoDiariaGrouped(arr, sepFn, groupKeyFn, groupLabelFn){
   let maxDate = null;
   for (const r of arr){
     const d = r.vtexCreation || r.createdAtAbbiamo;
@@ -2872,21 +2876,32 @@ function buildDistritalDiarioRows(tipo){
     if (v==null) continue;
     const dk = dayStart(d);
     const inMonth = d.getTime() >= monthStart;
-    const distKey = r.distrital || '(sem distrital)';
-    for (const g of [bucket('__ALL__','Rede (Geral)'), bucket(distKey, distKey)]){
+    const gKey = groupKeyFn(r);
+    for (const g of [bucket('__TOTAL__','__TOTAL__'), bucket(gKey, groupLabelFn(r))]){
       if (dk === today0) g.hoje.push(v);
       if (dk === yest0) g.ontem.push(v);
       if (inMonth) g.mes.push(v);
     }
   }
   const avg = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
-  const geralBucket = buckets.get('__ALL__');
-  buckets.delete('__ALL__');
-  const distList = [...buckets.values()]
+  const totalBucket = buckets.get('__TOTAL__');
+  buckets.delete('__TOTAL__');
+  const groupList = [...buckets.values()]
     .map(g => ({ label:g.label, hoje:avg(g.hoje), ontem:avg(g.ontem), mes:avg(g.mes) }))
     .sort((a,b) => a.label.localeCompare(b.label, 'pt-BR'));
-  const geral = geralBucket ? { label:geralBucket.label, hoje:avg(geralBucket.hoje), ontem:avg(geralBucket.ontem), mes:avg(geralBucket.mes) } : null;
-  return { geral, distList, maxDate };
+  const total = totalBucket ? { hoje:avg(totalBucket.hoje), ontem:avg(totalBucket.ontem), mes:avg(totalBucket.mes) } : null;
+  return { total, groupList, maxDate };
+}
+function distSepFn(tipo){
+  return tipo==='entrega'
+    ? (r => (r.vtexLastChange && r.vtexCreation && sameCalendarDay(r.vtexCreation, r.vtexLastChange) && RAPIDA_MODALIDADES.includes(r.modalidade)) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null)
+    : (r => (isSepElegivelRetirada(r, null, null) && r.vtexLastChange) ? diffMinutes(r.vtexLastChange, r.vtexCreation) : null);
+}
+/* Relatório de 1 Distrital: total do Distrital + um grupo por Coordenador dentro dele. */
+function buildDistritalCoordReport(tipo, distritalVal){
+  const wantType = tipo==='entrega' ? 'DELIVERY' : 'TAKEOUT';
+  const arr = state.joined.filter(r => r.orderType===wantType && r.distrital===distritalVal);
+  return buildSeparacaoDiariaGrouped(arr, distSepFn(tipo), r => r.coordenador || '(sem coordenador)', r => r.coordenador || '(sem coordenador)');
 }
 function distVariacaoInfo(hoje, ontem){
   if (hoje==null || ontem==null) return { txt:'—', cls:'var-flat' };
@@ -2894,50 +2909,84 @@ function distVariacaoInfo(hoje, ontem){
   if (hoje < ontem - 0.05) return { txt:'Diminuiu', cls:'var-down' };
   return { txt:'Estável', cls:'var-flat' };
 }
-function distRowHtml(r, highlight){
+function distRowHtml(label, r, highlight){
   const v = distVariacaoInfo(r.hoje, r.ontem);
   return `<tr class="${highlight?'dist-highlight':''}">
-    <td>${escapeHtml(r.label)}</td>
+    <td>${escapeHtml(label)}</td>
     <td class="mono">${fmtHHMMSS(r.hoje)}</td>
     <td class="mono">${fmtHHMMSS(r.mes)}</td>
     <td><span class="var-badge ${v.cls}">${v.txt}</span></td>
   </tr>`;
 }
-function buildDistritalImageHtml(tipo){
-  const data = buildDistritalDiarioRows(tipo);
-  if (!data) return null;
-  const { geral, distList, maxDate } = data;
+function buildDistritalImageHtml(tipo, distritalVal){
+  const data = buildDistritalCoordReport(tipo, distritalVal);
+  if (!data || !data.total) return null;
+  const { total, groupList, maxDate } = data;
   let diaLabel = maxDate.toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'2-digit' });
   diaLabel = diaLabel.charAt(0).toUpperCase() + diaLabel.slice(1);
   const diaCurto = maxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
   const tipoLabel = tipo==='entrega' ? 'Entrega' : 'Retirada em Loja';
-  const rowsHtml = (geral ? distRowHtml(geral, true) : '') + distList.map(r => distRowHtml(r, false)).join('');
+  const rowsHtml = distRowHtml('Distrital (Total)', total, true) + groupList.map(r => distRowHtml(r.label, r, false)).join('');
   return `<div class="dist-report">
     <div class="dist-title">
       <div>
-        <h3>Média de separação por Distrital — ${escapeHtml(tipoLabel)}</h3>
-        <div class="dist-sub">${escapeHtml(diaLabel)} · acumulado do mês e variação em relação ao dia anterior</div>
+        <h3>Média de separação — Distrital ${escapeHtml(distritalVal)} — ${escapeHtml(tipoLabel)}</h3>
+        <div class="dist-sub">${escapeHtml(diaLabel)} · por coordenador · acumulado do mês e variação em relação ao dia anterior</div>
       </div>
       <img src="data:image/png;base64,${FECH_LOGO_B64}" alt="Farmácias São João">
     </div>
     <table>
       <thead><tr>
-        <th>Distrital</th>
+        <th>Coordenador</th>
         <th>${escapeHtml(diaCurto)}</th>
         <th>Acumulado mês</th>
         <th>Relação com o dia anterior</th>
       </tr></thead>
-      <tbody>${rowsHtml || '<tr><td colspan="4" style="color:#93a0d9;padding:14px 6px;text-align:center">Sem dados suficientes para gerar o relatório.</td></tr>'}</tbody>
+      <tbody>${rowsHtml}</tbody>
     </table>
   </div>`;
+}
+function buildDistritalSheetRows(tipo, distritalVal){
+  const data = buildDistritalCoordReport(tipo, distritalVal);
+  if (!data || !data.total) return [];
+  const { total, groupList, maxDate } = data;
+  const diaCurto = maxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
+  const row = (label, r) => ({
+    'Distrital': distritalVal,
+    'Coordenador': label,
+    [`Média separação (${diaCurto})`]: fmtHHMMSS(r.hoje),
+    'Acumulado mês': fmtHHMMSS(r.mes),
+    'Dia anterior': fmtHHMMSS(r.ontem),
+    'Variação vs dia anterior': distVariacaoInfo(r.hoje, r.ontem).txt,
+  });
+  return [row('Distrital (Total)', total), ...groupList.map(r => row(r.label, r))];
 }
 
 const dlgDistrital = document.getElementById('dlgDistrital');
 let distTipoAtual = 'retirada';
+function distScopeOptions(){ return distinctSorted(state.joined, r => r.distrital); }
+function distPlannedScopeVals(){
+  if (document.getElementById('distScopeTodos').checked) return distScopeOptions();
+  const v = document.getElementById('distScopeVal').value;
+  return v ? [v] : [];
+}
+function updateDistCountHint(){
+  const vals = distPlannedScopeVals();
+  const hint = document.getElementById('distCountHint');
+  hint.textContent = vals.length > 1
+    ? `Serão geradas ${vals.length} planilhas e ${vals.length} imagens (baixadas uma a uma).`
+    : vals.length===1 ? '1 planilha e 1 imagem serão geradas.' : 'Escolha um Distrital (ou marque "gerar para todos").';
+}
 document.getElementById('btnOpenDistrital').onclick = () => {
   if (!state.joined.length){ showToast('Carregue os dados primeiro.', 'error'); return; }
   distTipoAtual = 'retirada';
   document.querySelectorAll('#distTipoToggle button').forEach(b => b.classList.toggle('active', b.dataset.tipo==='retirada'));
+  const opts = distScopeOptions();
+  document.getElementById('distScopeVal').innerHTML = opts.length ? opts.map(o=>`<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('') : '<option value="">Sem opções</option>';
+  document.getElementById('distScopeVal').disabled = false;
+  document.getElementById('distScopeVal').style.opacity = 1;
+  document.getElementById('distScopeTodos').checked = false;
+  updateDistCountHint();
   dlgDistrital.showModal();
 };
 dlgDistrital.querySelectorAll('[data-close]').forEach(b => b.onclick = () => dlgDistrital.close());
@@ -2946,31 +2995,49 @@ document.getElementById('distTipoToggle').addEventListener('click', e => {
   distTipoAtual = btn.dataset.tipo;
   document.querySelectorAll('#distTipoToggle button').forEach(b => b.classList.toggle('active', b===btn));
 });
+document.getElementById('distScopeVal').onchange = updateDistCountHint;
+document.getElementById('distScopeTodos').onchange = (e) => {
+  document.getElementById('distScopeVal').disabled = e.target.checked;
+  document.getElementById('distScopeVal').style.opacity = e.target.checked ? .5 : 1;
+  updateDistCountHint();
+};
 document.getElementById('btnGerarDistrital').onclick = async () => {
-  const html = buildDistritalImageHtml(distTipoAtual);
-  if (!html){ showToast('Sem dados para gerar a imagem.', 'error'); return; }
+  const vals = distPlannedScopeVals();
+  if (!vals.length){ showToast('Escolha um Distrital (ou marque "gerar para todos").', 'error'); return; }
+
   const holder = document.createElement('div');
   holder.style.position = 'fixed'; holder.style.left = '-99999px'; holder.style.top = '0';
   document.body.appendChild(holder);
   const btn = document.getElementById('btnGerarDistrital');
   btn.disabled = true;
-  try{
-    holder.innerHTML = html;
-    const el = holder.querySelector('.dist-report');
-    const canvas = await html2canvas(el, { scale:2, backgroundColor:'#0b1440' });
-    const a = document.createElement('a');
-    a.download = `distrital-${distTipoAtual}-${todayStr()}.png`;
-    a.href = canvas.toDataURL('image/png');
-    a.click();
-    showToast('Imagem gerada.');
-    dlgDistrital.close();
-  } catch(err){
-    console.error('[distrital]', err);
-    showToast('Falha ao gerar imagem: ' + err.message, 'error');
-  } finally {
-    document.body.removeChild(holder);
-    btn.disabled = false;
+  let ok = 0, fail = 0;
+  for (let i=0; i<vals.length; i++){
+    const distritalVal = vals[i];
+    showToast(vals.length>1 ? `Gerando ${i+1} de ${vals.length}…` : 'Gerando…');
+    try{
+      const sheetRows = buildDistritalSheetRows(distTipoAtual, distritalVal);
+      const html = buildDistritalImageHtml(distTipoAtual, distritalVal);
+      if (!sheetRows.length || !html) throw new Error('Sem dados suficientes para esse Distrital.');
+      const slug = distritalVal.replace(/[^\w-]+/g,'_');
+      exportRowsXlsx(sheetRows, `distrital-${distTipoAtual}-${slug}-${todayStr()}.xlsx`, 'Distrital');
+      holder.innerHTML = html;
+      const el = holder.querySelector('.dist-report');
+      const canvas = await html2canvas(el, { scale:2, backgroundColor:'#0b1440' });
+      const a = document.createElement('a');
+      a.download = `distrital-${distTipoAtual}-${slug}-${todayStr()}.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+      ok++;
+      await new Promise(r => setTimeout(r, 500));
+    } catch(err){
+      fail++;
+      console.error('[distrital]', distritalVal, err);
+    }
   }
+  document.body.removeChild(holder);
+  btn.disabled = false;
+  showToast(fail ? `${ok} par(es) gerado(s), ${fail} falharam (veja o console).` : `${ok} planilha(s) e ${ok} imagem(ns) geradas.`, fail ? 'error' : undefined);
+  dlgDistrital.close();
 };
 
 /* =====================================================================
