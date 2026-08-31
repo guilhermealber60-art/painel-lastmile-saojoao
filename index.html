@@ -2955,8 +2955,8 @@ function buildDistritalImageHtml(tipo, distritalVal){
 /* Planilha do relatório por Distrital: lista as Filiais do Distrital no
    mesmo layout já usado em "Exportar planilha de separação" (Filial | Média
    separação | Qtd pedidos | Cód loja | Diretor | Distrital | Coordenador |
-   UF | Micro Região). Usa o acumulado do mês corrente (mesma janela do
-   "Acumulado mês" da imagem) — independe dos filtros ativos na tela. */
+   UF | Micro Região). Usa só o dia mais recente com dados (mesma janela da
+   coluna "Dia" da imagem) — independe dos filtros ativos na tela. */
 function buildDistritalFilialSheetRows(tipo, distritalVal){
   const wantType = tipo==='entrega' ? 'DELIVERY' : 'TAKEOUT';
   const scoped = state.joined.filter(r => r.orderType===wantType && r.distrital===distritalVal);
@@ -2967,8 +2967,9 @@ function buildDistritalFilialSheetRows(tipo, distritalVal){
     if (!maxDate || d > maxDate) maxDate = d;
   }
   if (!maxDate) return [];
-  const monthStart = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
-  const arr = scoped.filter(r => { const d = r.vtexCreation || r.createdAtAbbiamo; return d && d >= monthStart; });
+  const dayStart = d => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+  const today0 = dayStart(maxDate);
+  const arr = scoped.filter(r => { const d = r.vtexCreation || r.createdAtAbbiamo; return d && dayStart(d) === today0; });
   const grouped = buildSeparacaoPorFilial(arr, distSepFn(tipo));
   return grouped.map(g => ({
     'Filial': g.filial,
