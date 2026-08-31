@@ -323,6 +323,9 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 .dist-report .var-badge.var-up{color:#c40d16; background:#fbdbdc}
 .dist-report .var-badge.var-down{color:#137a38; background:#d7f2df}
 .dist-report .var-badge.var-flat{color:#5b6284; background:#1a2352}
+/* Variante "ambos" (Retirada + Entrega unificadas): separa visualmente os
+   dois grupos de 3 colunas com uma borda vertical. */
+.dist-report th[colspan]:not(:first-child), .dist-report td:nth-child(5){border-left:1px solid #253166}
 </style>
 </head>
 <body>
@@ -2965,6 +2968,90 @@ function buildDistritalSheetRows(tipo, distritalVal){
   return [row('Distrital (Total)', total), ...groupList.map(r => row(r.label, r))];
 }
 
+/* ---- Variante "ambos" — unifica Retirada + Entrega num único par planilha+imagem
+   por Distrital (em vez de gerar um par para cada tipo). Junta os grupos de
+   Coordenador dos dois tipos (união); coordenador sem pedidos num dos tipos
+   aparece com "—" naquele lado. */
+function buildDistritalCoordReportBoth(distritalVal){
+  const retirada = buildDistritalCoordReport('retirada', distritalVal);
+  const entrega = buildDistritalCoordReport('entrega', distritalVal);
+  if ((!retirada || !retirada.total) && (!entrega || !entrega.total)) return null;
+
+  const rows = new Map();
+  function ensure(label){
+    if (!rows.has(label)) rows.set(label, { label, retirada:null, entrega:null });
+    return rows.get(label);
+  }
+  if (retirada) for (const g of retirada.groupList) ensure(g.label).retirada = g;
+  if (entrega) for (const g of entrega.groupList) ensure(g.label).entrega = g;
+  const groupList = [...rows.values()].sort((a,b) => a.label.localeCompare(b.label, 'pt-BR'));
+  const total = { label:'Distrital (Total)', retirada: retirada ? retirada.total : null, entrega: entrega ? entrega.total : null };
+  return { total, groupList, retiradaMaxDate: retirada ? retirada.maxDate : null, entregaMaxDate: entrega ? entrega.maxDate : null };
+}
+function distSideCellsHtml(side){
+  if (!side) return '<td class="mono">—</td><td class="mono">—</td><td><span class="var-badge var-flat">—</span></td>';
+  const v = distVariacaoInfo(side.hoje, side.ontem);
+  return `<td class="mono">${fmtHHMMSS(side.hoje)}</td><td class="mono">${fmtHHMMSS(side.mes)}</td><td><span class="var-badge ${v.cls}">${v.txt}</span></td>`;
+}
+function distRowHtmlBoth(label, row, highlight){
+  return `<tr class="${highlight?'dist-highlight':''}">
+    <td>${escapeHtml(label)}</td>
+    ${distSideCellsHtml(row.retirada)}
+    ${distSideCellsHtml(row.entrega)}
+  </tr>`;
+}
+function buildDistritalImageHtmlBoth(distritalVal){
+  const data = buildDistritalCoordReportBoth(distritalVal);
+  if (!data) return null;
+  const { total, groupList, retiradaMaxDate, entregaMaxDate } = data;
+  const diaRet = retiradaMaxDate ? retiradaMaxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) : '—';
+  const diaEnt = entregaMaxDate ? entregaMaxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) : '—';
+  const rowsHtml = distRowHtmlBoth('Distrital (Total)', total, true) + groupList.map(r => distRowHtmlBoth(r.label, r, false)).join('');
+  return `<div class="dist-report" style="width:1180px">
+    <div class="dist-title">
+      <div>
+        <h3>Média de separação — Distrital ${escapeHtml(distritalVal)} — Retirada + Entrega</h3>
+        <div class="dist-sub">Por coordenador · acumulado do mês e variação em relação ao dia anterior de cada tipo</div>
+      </div>
+      <img src="data:image/png;base64,${FECH_LOGO_B64}" alt="Farmácias São João">
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">Coordenador</th>
+          <th colspan="3">Retirada em Loja — ${escapeHtml(diaRet)}</th>
+          <th colspan="3">Entrega — ${escapeHtml(diaEnt)}</th>
+        </tr>
+        <tr>
+          <th>Dia</th><th>Acum. mês</th><th>Variação</th>
+          <th>Dia</th><th>Acum. mês</th><th>Variação</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </div>`;
+}
+function buildDistritalSheetRowsBoth(distritalVal){
+  const data = buildDistritalCoordReportBoth(distritalVal);
+  if (!data) return [];
+  const { total, groupList, retiradaMaxDate, entregaMaxDate } = data;
+  const diaRet = retiradaMaxDate ? retiradaMaxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) : null;
+  const diaEnt = entregaMaxDate ? entregaMaxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) : null;
+  const sideCols = (prefix, side, diaLabel) => ({
+    [`${prefix} — Média separação${diaLabel ? ` (${diaLabel})` : ''}`]: side ? fmtHHMMSS(side.hoje) : '—',
+    [`${prefix} — Acumulado mês`]: side ? fmtHHMMSS(side.mes) : '—',
+    [`${prefix} — Dia anterior`]: side ? fmtHHMMSS(side.ontem) : '—',
+    [`${prefix} — Variação`]: side ? distVariacaoInfo(side.hoje, side.ontem).txt : '—',
+  });
+  const row = (label, r) => ({
+    'Distrital': distritalVal,
+    'Coordenador': label,
+    ...sideCols('Retirada', r.retirada, diaRet),
+    ...sideCols('Entrega', r.entrega, diaEnt),
+  });
+  return [row('Distrital (Total)', total), ...groupList.map(r => row(r.label, r))];
+}
+
 const dlgDistrital = document.getElementById('dlgDistrital');
 let distTipoAtual = 'retirada';
 function distScopeOptions(){ return distinctSorted(state.joined, r => r.distrital); }
@@ -2973,21 +3060,14 @@ function distPlannedScopeVals(){
   const v = document.getElementById('distScopeVal').value;
   return v ? [v] : [];
 }
-/* Monta a lista de combinações (tipo × Distrital) a gerar, conforme o
-   checkbox "gerar os dois tipos" e o escopo escolhido (1 distrital ou todos). */
-function distPlannedCombos(){
-  const tipos = document.getElementById('distTipoAmbos').checked ? ['retirada','entrega'] : [distTipoAtual];
-  const vals = distPlannedScopeVals();
-  const combos = [];
-  for (const tipo of tipos) for (const distritalVal of vals) combos.push({ tipo, distritalVal });
-  return combos;
-}
+/* Com "gerar os dois tipos" marcado, Retirada + Entrega são unificadas num único
+   par planilha+imagem por Distrital (não dobra a quantidade de arquivos). */
 function updateDistCountHint(){
-  const combos = distPlannedCombos();
+  const vals = distPlannedScopeVals();
   const hint = document.getElementById('distCountHint');
-  hint.textContent = combos.length > 1
-    ? `Serão geradas ${combos.length} planilhas e ${combos.length} imagens (baixadas uma a uma).`
-    : combos.length===1 ? '1 planilha e 1 imagem serão geradas.' : 'Escolha um Distrital (ou marque "gerar para todos").';
+  hint.textContent = vals.length > 1
+    ? `Serão geradas ${vals.length} planilhas e ${vals.length} imagens (baixadas uma a uma).`
+    : vals.length===1 ? '1 planilha e 1 imagem serão geradas.' : 'Escolha um Distrital (ou marque "gerar para todos").';
 }
 document.getElementById('btnOpenDistrital').onclick = () => {
   if (!state.joined.length){ showToast('Carregue os dados primeiro.', 'error'); return; }
@@ -3023,8 +3103,9 @@ document.getElementById('distScopeTodos').onchange = (e) => {
   updateDistCountHint();
 };
 document.getElementById('btnGerarDistrital').onclick = async () => {
-  const combos = distPlannedCombos();
-  if (!combos.length){ showToast('Escolha um Distrital (ou marque "gerar para todos").', 'error'); return; }
+  const vals = distPlannedScopeVals();
+  if (!vals.length){ showToast('Escolha um Distrital (ou marque "gerar para todos").', 'error'); return; }
+  const ambos = document.getElementById('distTipoAmbos').checked;
 
   const holder = document.createElement('div');
   holder.style.position = 'fixed'; holder.style.left = '-99999px'; holder.style.top = '0';
@@ -3032,27 +3113,28 @@ document.getElementById('btnGerarDistrital').onclick = async () => {
   const btn = document.getElementById('btnGerarDistrital');
   btn.disabled = true;
   let ok = 0, fail = 0;
-  for (let i=0; i<combos.length; i++){
-    const { tipo, distritalVal } = combos[i];
-    showToast(combos.length>1 ? `Gerando ${i+1} de ${combos.length}…` : 'Gerando…');
+  for (let i=0; i<vals.length; i++){
+    const distritalVal = vals[i];
+    showToast(vals.length>1 ? `Gerando ${i+1} de ${vals.length}…` : 'Gerando…');
     try{
-      const sheetRows = buildDistritalSheetRows(tipo, distritalVal);
-      const html = buildDistritalImageHtml(tipo, distritalVal);
+      const sheetRows = ambos ? buildDistritalSheetRowsBoth(distritalVal) : buildDistritalSheetRows(distTipoAtual, distritalVal);
+      const html = ambos ? buildDistritalImageHtmlBoth(distritalVal) : buildDistritalImageHtml(distTipoAtual, distritalVal);
       if (!sheetRows.length || !html) throw new Error('Sem dados suficientes para esse Distrital.');
+      const fileTag = ambos ? 'ambos' : distTipoAtual;
       const slug = distritalVal.replace(/[^\w-]+/g,'_');
-      exportRowsXlsx(sheetRows, `distrital-${tipo}-${slug}-${todayStr()}.xlsx`, 'Distrital');
+      exportRowsXlsx(sheetRows, `distrital-${fileTag}-${slug}-${todayStr()}.xlsx`, 'Distrital');
       holder.innerHTML = html;
       const el = holder.querySelector('.dist-report');
       const canvas = await html2canvas(el, { scale:2, backgroundColor:'#0b1440' });
       const a = document.createElement('a');
-      a.download = `distrital-${tipo}-${slug}-${todayStr()}.png`;
+      a.download = `distrital-${fileTag}-${slug}-${todayStr()}.png`;
       a.href = canvas.toDataURL('image/png');
       a.click();
       ok++;
       await new Promise(r => setTimeout(r, 500));
     } catch(err){
       fail++;
-      console.error('[distrital]', tipo, distritalVal, err);
+      console.error('[distrital]', distritalVal, err);
     }
   }
   document.body.removeChild(holder);
