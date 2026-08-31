@@ -2067,6 +2067,10 @@ document.querySelectorAll('[data-export]').forEach(btn => {
   });
 });
 function todayStr(){ const d=new Date(); return d.toISOString().slice(0,10); }
+function todayStrDDMM(){ const d=new Date(); return String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+/* Sanitiza só os caracteres inválidos em nome de arquivo (Windows), mantendo
+   espaços e acentos — usado no nome dos arquivos do relatório por Distrital. */
+function safeFileName(s){ return String(s).replace(/[\\/:*?"<>|]+/g, '_').trim(); }
 
 function exportPedidos(scope){
   let filtered = applyFilters();
@@ -3114,8 +3118,7 @@ document.getElementById('btnGerarDistrital').onclick = async () => {
     showToast(vals.length>1 ? `Gerando ${i+1} de ${vals.length}…` : 'Gerando…');
     try{
       const html = ambos ? buildDistritalImageHtmlBoth(distritalVal) : buildDistritalImageHtml(distTipoAtual, distritalVal);
-      const fileTag = ambos ? 'ambos' : distTipoAtual;
-      const slug = distritalVal.replace(/[^\w-]+/g,'_');
+      const fileBase = `${safeFileName(distritalVal)}-${todayStrDDMM()}`;
       const retRows = ambos ? buildDistritalFilialSheetRows('retirada', distritalVal) : null;
       const entRows = ambos ? buildDistritalFilialSheetRows('entrega', distritalVal) : null;
       const rows = ambos ? null : buildDistritalFilialSheetRows(distTipoAtual, distritalVal);
@@ -3123,17 +3126,17 @@ document.getElementById('btnGerarDistrital').onclick = async () => {
       if (!hasSheetData || !html) throw new Error('Sem dados suficientes para esse Distrital.');
       if (ambos){
         exportRowsXlsxMulti([
-          { name:'Separação Retirada', rows: retRows.length ? retRows : [{ 'Filial':'Sem pedidos no mês' }] },
-          { name:'Separação Entrega', rows: entRows.length ? entRows : [{ 'Filial':'Sem pedidos no mês' }] },
-        ], `distrital-${fileTag}-${slug}-${todayStr()}.xlsx`);
+          { name:'Separação Retirada', rows: retRows.length ? retRows : [{ 'Filial':'Sem pedidos no dia' }] },
+          { name:'Separação Entrega', rows: entRows.length ? entRows : [{ 'Filial':'Sem pedidos no dia' }] },
+        ], `${fileBase}.xlsx`);
       } else {
-        exportRowsXlsx(rows, `distrital-${fileTag}-${slug}-${todayStr()}.xlsx`, 'Distrital');
+        exportRowsXlsx(rows, `${fileBase}.xlsx`, 'Distrital');
       }
       holder.innerHTML = html;
       const el = holder.querySelector('.dist-report');
       const canvas = await html2canvas(el, { scale:2, backgroundColor:'#0b1440' });
       const a = document.createElement('a');
-      a.download = `distrital-${fileTag}-${slug}-${todayStr()}.png`;
+      a.download = `${fileBase}.png`;
       a.href = canvas.toDataURL('image/png');
       a.click();
       ok++;
