@@ -2952,20 +2952,35 @@ function buildDistritalImageHtml(tipo, distritalVal){
     </table>
   </div>`;
 }
-function buildDistritalSheetRows(tipo, distritalVal){
-  const data = buildDistritalCoordReport(tipo, distritalVal);
-  if (!data || !data.total) return [];
-  const { total, groupList, maxDate } = data;
-  const diaCurto = maxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
-  const row = (label, r) => ({
-    'Distrital': distritalVal,
-    'Coordenador': label,
-    [`Média separação (${diaCurto})`]: fmtHHMMSS(r.hoje),
-    'Acumulado mês': fmtHHMMSS(r.mes),
-    'Dia anterior': fmtHHMMSS(r.ontem),
-    'Variação vs dia anterior': distVariacaoInfo(r.hoje, r.ontem).txt,
-  });
-  return [row('Distrital (Total)', total), ...groupList.map(r => row(r.label, r))];
+/* Planilha do relatório por Distrital: lista as Filiais do Distrital no
+   mesmo layout já usado em "Exportar planilha de separação" (Filial | Média
+   separação | Qtd pedidos | Cód loja | Diretor | Distrital | Coordenador |
+   UF | Micro Região). Usa o acumulado do mês corrente (mesma janela do
+   "Acumulado mês" da imagem) — independe dos filtros ativos na tela. */
+function buildDistritalFilialSheetRows(tipo, distritalVal){
+  const wantType = tipo==='entrega' ? 'DELIVERY' : 'TAKEOUT';
+  const scoped = state.joined.filter(r => r.orderType===wantType && r.distrital===distritalVal);
+  let maxDate = null;
+  for (const r of scoped){
+    const d = r.vtexCreation || r.createdAtAbbiamo;
+    if (!d) continue;
+    if (!maxDate || d > maxDate) maxDate = d;
+  }
+  if (!maxDate) return [];
+  const monthStart = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+  const arr = scoped.filter(r => { const d = r.vtexCreation || r.createdAtAbbiamo; return d && d >= monthStart; });
+  const grouped = buildSeparacaoPorFilial(arr, distSepFn(tipo));
+  return grouped.map(g => ({
+    'Filial': g.filial,
+    'Média separação': fmtHHMMSS(g.avg),
+    'Qtd pedidos': g.qtd,
+    'Cód loja': g.cod,
+    'Diretor': g.diretor,
+    'Distrital': g.distrital,
+    'Coordenador': g.coordenador,
+    'UF': g.uf,
+    'Micro Região': g.microRegiao,
+  }));
 }
 
 /* ---- Variante "ambos" — unifica Retirada + Entrega num único par planilha+imagem
@@ -3030,26 +3045,6 @@ function buildDistritalImageHtmlBoth(distritalVal){
       <tbody>${rowsHtml}</tbody>
     </table>
   </div>`;
-}
-function buildDistritalSheetRowsBoth(distritalVal){
-  const data = buildDistritalCoordReportBoth(distritalVal);
-  if (!data) return [];
-  const { total, groupList, retiradaMaxDate, entregaMaxDate } = data;
-  const diaRet = retiradaMaxDate ? retiradaMaxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) : null;
-  const diaEnt = entregaMaxDate ? entregaMaxDate.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) : null;
-  const sideCols = (prefix, side, diaLabel) => ({
-    [`${prefix} — Média separação${diaLabel ? ` (${diaLabel})` : ''}`]: side ? fmtHHMMSS(side.hoje) : '—',
-    [`${prefix} — Acumulado mês`]: side ? fmtHHMMSS(side.mes) : '—',
-    [`${prefix} — Dia anterior`]: side ? fmtHHMMSS(side.ontem) : '—',
-    [`${prefix} — Variação`]: side ? distVariacaoInfo(side.hoje, side.ontem).txt : '—',
-  });
-  const row = (label, r) => ({
-    'Distrital': distritalVal,
-    'Coordenador': label,
-    ...sideCols('Retirada', r.retirada, diaRet),
-    ...sideCols('Entrega', r.entrega, diaEnt),
-  });
-  return [row('Distrital (Total)', total), ...groupList.map(r => row(r.label, r))];
 }
 
 const dlgDistrital = document.getElementById('dlgDistrital');
@@ -3117,12 +3112,22 @@ document.getElementById('btnGerarDistrital').onclick = async () => {
     const distritalVal = vals[i];
     showToast(vals.length>1 ? `Gerando ${i+1} de ${vals.length}…` : 'Gerando…');
     try{
-      const sheetRows = ambos ? buildDistritalSheetRowsBoth(distritalVal) : buildDistritalSheetRows(distTipoAtual, distritalVal);
       const html = ambos ? buildDistritalImageHtmlBoth(distritalVal) : buildDistritalImageHtml(distTipoAtual, distritalVal);
-      if (!sheetRows.length || !html) throw new Error('Sem dados suficientes para esse Distrital.');
       const fileTag = ambos ? 'ambos' : distTipoAtual;
       const slug = distritalVal.replace(/[^\w-]+/g,'_');
-      exportRowsXlsx(sheetRows, `distrital-${fileTag}-${slug}-${todayStr()}.xlsx`, 'Distrital');
+      const retRows = ambos ? buildDistritalFilialSheetRows('retirada', distritalVal) : null;
+      const entRows = ambos ? buildDistritalFilialSheetRows('entrega', distritalVal) : null;
+      const rows = ambos ? null : buildDistritalFilialSheetRows(distTipoAtual, distritalVal);
+      const hasSheetData = ambos ? (retRows.length>0 || entRows.length>0) : rows.length>0;
+      if (!hasSheetData || !html) throw new Error('Sem dados suficientes para esse Distrital.');
+      if (ambos){
+        exportRowsXlsxMulti([
+          { name:'Separação Retirada', rows: retRows.length ? retRows : [{ 'Filial':'Sem pedidos no mês' }] },
+          { name:'Separação Entrega', rows: entRows.length ? entRows : [{ 'Filial':'Sem pedidos no mês' }] },
+        ], `distrital-${fileTag}-${slug}-${todayStr()}.xlsx`);
+      } else {
+        exportRowsXlsx(rows, `distrital-${fileTag}-${slug}-${todayStr()}.xlsx`, 'Distrital');
+      }
       holder.innerHTML = html;
       const el = holder.querySelector('.dist-report');
       const canvas = await html2canvas(el, { scale:2, backgroundColor:'#0b1440' });
