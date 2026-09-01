@@ -273,7 +273,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 .fech-logo img{height:46px; width:auto; display:block}
 
 .fech-kpis{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px}
-.fech-kpis .fkpi{flex:1 1 150px}
+.fech-kpis .fkpi{flex:1 1 245px}
 .fkpi{background:#fff; border-radius:12px; box-shadow:0 1px 2px rgba(18,20,48,.1); padding:13px 14px; display:flex; flex-direction:column; gap:9px}
 .fkpi .fic{width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:15px}
 .fkpi .flbl{font-size:9.5px; font-weight:800; color:#5b6284; text-transform:uppercase; letter-spacing:.3px}
@@ -2672,10 +2672,19 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
     const rapidaArr = rowsScoped.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
     const rapidaMedSep = avgSep(rapidaArr, sepFrom, sepTo);
     const sepOk = rapidaMedSep!=null && rapidaMedSep<=15;
+    // SLA quebrado por transportadora: Uber/99 (frota sob demanda) vs demais
+    // transportadoras (terceirizados) — mesmo cálculo do SLA geral (m.sla),
+    // só recortando rowsScoped pelo carrier antes.
+    const uberNoventaNoveArr = rowsScoped.filter(r => COLLECT_VIA_TRANSIT_CARRIERS.has(r.carrier));
+    const terceirizadosArr = rowsScoped.filter(r => !COLLECT_VIA_TRANSIT_CARRIERS.has(r.carrier));
+    const slaUberNoventaNove = computeEntregaGroup(uberNoventaNoveArr, uberNoventaNoveArr, sepFrom, sepTo).sla;
+    const slaTerceirizados = computeEntregaGroup(terceirizadosArr, terceirizadosArr, sepFrom, sepTo).sla;
     kpisHtml = [
       fechKpiHtml('📋','#dcedfb','Qtd total pedidos', fmtInt(m.total)),
       fechKpiHtml('✅','#d7f2df','Finalizados', fmtInt(m.finalizados), null, '#137a38'),
       fechKpiHtml('📈','#dcedfb','SLA', fmtPct(m.sla), null, (m.sla!=null && m.sla>=0.9)?'#137a38':'#c40d16'),
+      fechKpiHtml('🛵','#dcedfb','SLA — Uber/99', fmtPct(slaUberNoventaNove), null, (slaUberNoventaNove!=null && slaUberNoventaNove>=0.9)?'#137a38':'#c40d16'),
+      fechKpiHtml('🚚','#dcedfb','SLA — Terceirizados', fmtPct(slaTerceirizados), null, (slaTerceirizados!=null && slaTerceirizados>=0.9)?'#137a38':'#c40d16'),
       fechKpiHtml('🕐','#d7f2df','No prazo', fmtInt(m.noPrazo), null, '#137a38'),
       fechKpiHtml('🕐','#fbdbdc','Atraso', fmtInt(m.atraso), null, '#c40d16'),
       fechKpiHtml('⏳','#f6e6c6','Sem andamento', fmtInt(m.semAndamento), null, m.semAndamento>0?'#8f5a08':'#1E2761'),
