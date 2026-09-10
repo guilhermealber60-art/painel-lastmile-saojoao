@@ -493,6 +493,12 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
         <div class="table-wrap" id="rankEntregaSemAndamento"></div>
         <button class="iconbtn" style="margin-top:8px" data-export="entrega-sem-andamento">Exportar todas</button>
       </div>
+      <div class="card" style="margin-top:14px">
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Cancelados, falhos, devolvidos e em manuseio</h3>
+        <div class="modtable-toggle" id="rtEntregaCanceladoHandling" style="margin-bottom:8px"></div>
+        <div class="table-wrap" id="rankEntregaCanceladoHandling"></div>
+        <button class="iconbtn" style="margin-top:8px" data-export="entrega-cancelado-handling">Exportar todas</button>
+      </div>
     </div>
   </section>
 
@@ -787,8 +793,11 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 const VALID_ORIGINS = new Set(['VTEX','API-V2','API Abbiamo']);
 /* SCHEDULED (agendado) fica de fora — pedido agendado pro futuro não conta
    como "sem andamento" mesmo com o prazo prometido já no passado. */
-const INTERMEDIATE_STATUS = new Set(['CREATED','HANDLING','MANUAL_HANDLE','DISPATCHED','START_DELIVERY']);
+const INTERMEDIATE_STATUS = new Set(['CREATED','DISPATCHED','START_DELIVERY']);
 const RESOLVED_STATUS = new Set(['SUCCESSFUL','FAILED','ORDER_FAILED','RETURNED','CANCELED']);
+/* HANDLING/MANUAL_HANDLE saíram de "sem andamento": entram, junto com os
+   status resolvidos ruins (cancelado/falho/devolvido), no card à parte. */
+const CANCELADO_HANDLING_STATUS = new Set(['CANCELED','FAILED','ORDER_FAILED','RETURNED','HANDLING','MANUAL_HANDLE']);
 const COLLECT_VIA_TRANSIT_CARRIERS = new Set(['UBER','99-ENTREGAS']);
 
 const MODALIDADES = [
@@ -1279,12 +1288,13 @@ function computeEntregaGroup(arr, arrVtex, from, to){
   const noPrazo = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate>=r.deliveredDate).length;
   const atraso = finalizados.filter(r => r.promisedDate && r.deliveredDate && r.promisedDate<r.deliveredDate).length;
   const semAndamento = arr.filter(r => INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length;
+  const canceladoHandling = arr.filter(r => CANCELADO_HANDLING_STATUS.has(r.status)).length;
   const sepVals = arrVtex.filter(r=>r.vtexLastChange && r.vtexCreation && dateInRange(r.vtexCreation, from, to) && sameCalendarDay(r.vtexCreation, r.vtexLastChange)).map(r=>diffMinutes(r.vtexLastChange,r.vtexCreation));
   const medSep = sepVals.length ? sepVals.reduce((a,b)=>a+b,0)/sepVals.length : null;
   return {
     total, finalizados: finalizados.length, noPrazo, atraso,
     sla: finalizados.length? noPrazo/finalizados.length : null,
-    semAndamento, medSep, taxaFinalizados: total? finalizados.length/total : null, arr, arrVtex,
+    semAndamento, canceladoHandling, medSep, taxaFinalizados: total? finalizados.length/total : null, arr, arrVtex,
   };
 }
 function computeEntrega(rows, rowsVtex, from, to){
@@ -1535,6 +1545,7 @@ function renderEntrega(rows, rowsVtex){
     { lbl:'No prazo', val:fmtInt(g.noPrazo), accent:'green' },
     { lbl:'Atraso', val:fmtInt(g.atraso), accent:'red' },
     { lbl:'Sem andamento', val:fmtInt(g.semAndamento), accent: g.semAndamento>0?'red':undefined },
+    { lbl:'Cancelado/Falho/Manuseio', val:fmtInt(g.canceladoHandling), accent: g.canceladoHandling>0?'red':undefined },
     { lbl:'Méd. sep. (Rápida)', val:fmtMinutes(rapidaMedSep), sub: rapidaMedSep!=null ? (sepOk?'dentro da meta (15min)':'acima da meta (15min)') : 'sem pedidos rápida no filtro', accent: sepOk?'green':'red' },
     { lbl:'Taxa de finalizados', val:fmtPct(g.taxaFinalizados), accent:'blue' },
   ];
@@ -1561,6 +1572,11 @@ function renderEntrega(rows, rowsVtex){
   renderRankSection({
     stateKey:'entregaSemAndamento', tabsId:'rtEntregaSemAndamento', tableId:'rankEntregaSemAndamento', exportKey:'entrega-sem-andamento',
     arr:g.arr, valueFn: items => items.filter(r=>INTERMEDIATE_STATUS.has(r.status) && r.promisedDate && r.promisedDate<now).length,
+    valueLabel:'Quantidade', fmt:v=>fmtInt(v), onlyPositive:true,
+  });
+  renderRankSection({
+    stateKey:'entregaCanceladoHandling', tabsId:'rtEntregaCanceladoHandling', tableId:'rankEntregaCanceladoHandling', exportKey:'entrega-cancelado-handling',
+    arr:g.arr, valueFn: items => items.filter(r=>CANCELADO_HANDLING_STATUS.has(r.status)).length,
     valueLabel:'Quantidade', fmt:v=>fmtInt(v), onlyPositive:true,
   });
 }
@@ -2688,6 +2704,7 @@ function buildFechamentoHtml(tipo, y, mo, scopeType, scopeVal){
       fechKpiHtml('🕐','#d7f2df','No prazo', fmtInt(m.noPrazo), null, '#137a38'),
       fechKpiHtml('🕐','#fbdbdc','Atraso', fmtInt(m.atraso), null, '#c40d16'),
       fechKpiHtml('⏳','#f6e6c6','Sem andamento', fmtInt(m.semAndamento), null, m.semAndamento>0?'#8f5a08':'#1E2761'),
+      fechKpiHtml('🚫','#f6e6c6','Cancelado/Falho/Manuseio', fmtInt(m.canceladoHandling), null, m.canceladoHandling>0?'#8f5a08':'#1E2761'),
       fechKpiHtml('✂️', sepOk?'#d7f2df':'#fbdbdc','Méd. sep. (rápida)', fmtMinutes(rapidaMedSep), sepOk?'dentro da meta (15min)':'acima da meta (15min)', sepOk?'#137a38':'#c40d16'),
       fechKpiHtml('🎯','#dcedfb','Taxa de finalizados', fmtPct(m.taxaFinalizados), null, '#0d5fa3'),
     ].join('');
