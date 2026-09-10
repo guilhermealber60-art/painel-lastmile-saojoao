@@ -508,7 +508,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
         <button class="iconbtn" style="margin-top:8px" data-export="entrega-sem-andamento">Exportar todas</button>
       </div>
       <div class="card" style="margin-top:14px">
-        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Cancelados, falhos, devolvidos, em manuseio e fora da Abbiamo</h3>
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Sem status definido <span class="sub" style="font-family:var(--font-mono)">(cancelado, falho, devolvido, em manuseio ou fora da Abbiamo)</span></h3>
         <div class="modtable-toggle" id="rtEntregaCanceladoHandling" style="margin-bottom:8px"></div>
         <div class="table-wrap" id="rankEntregaCanceladoHandling"></div>
         <button class="iconbtn" style="margin-top:8px" data-export="entrega-cancelado-handling">Exportar todas</button>
@@ -1589,7 +1589,7 @@ function renderEntrega(rows, rowsVtex){
     { key:'noPrazo', lbl:'No prazo', val:fmtInt(g.noPrazo), accent:'green' },
     { key:'atraso', lbl:'Atraso', val:fmtInt(g.atraso), accent:'red' },
     { key:'semAndamento', lbl:'Sem andamento', val:fmtInt(g.semAndamento), accent: g.semAndamento>0?'red':undefined },
-    { key:'canceladoHandling', lbl:'Cancelado / Falho / Manuseio / Fora Abbiamo', val:fmtInt(canceladoHandlingMerged.length), accent: canceladoHandlingMerged.length>0?'red':undefined },
+    { key:'canceladoHandling', lbl:'Sem status definido', val:fmtInt(canceladoHandlingMerged.length), accent: canceladoHandlingMerged.length>0?'red':undefined },
     { key:'medSep', lbl:'Méd. sep. (Rápida)', val:fmtMinutes(rapidaMedSep), sub: rapidaMedSep!=null ? (sepOk?'dentro da meta (15min)':'acima da meta (15min)') : 'sem pedidos rápida no filtro', accent: sepOk?'green':'red' },
     { key:'taxaFinalizados', lbl:'Taxa de finalizados', val:fmtPct(g.taxaFinalizados), accent:'blue' },
   ];
