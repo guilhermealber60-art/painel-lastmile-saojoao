@@ -152,6 +152,16 @@ main{padding:18px 20px 60px; max-width:1500px; margin:0 auto}
 }
 .iconbtn:hover{border-color:var(--blue); color:var(--blue)}
 
+.kpi-toggle-wrap{position:relative}
+.kpi-toggle-panel{
+  display:none; position:absolute; right:0; top:calc(100% + 6px); z-index:20;
+  background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow);
+  padding:10px 12px; min-width:240px; max-height:320px; overflow-y:auto;
+}
+.kpi-toggle-panel.open{display:block}
+.kpi-toggle-panel label{display:flex; align-items:center; gap:7px; font-size:12px; padding:4px 0; cursor:pointer; color:var(--ink-2); white-space:nowrap}
+.kpi-toggle-panel input{cursor:pointer}
+
 .card{
   background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--border);
 }
@@ -455,6 +465,10 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <h2>Entrega <span class="badge-count" id="entregaCount">0</span></h2>
       <span class="sub">order_type = DELIVERY</span>
       <div class="panel-actions">
+        <div class="kpi-toggle-wrap">
+          <button class="iconbtn" id="btnEntregaCards">⚙ Cards</button>
+          <div class="kpi-toggle-panel" id="entregaCardsPanel"></div>
+        </div>
         <button class="iconbtn" id="btnToggleEntrega">Ocultar</button>
       </div>
     </div>
@@ -494,7 +508,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
         <button class="iconbtn" style="margin-top:8px" data-export="entrega-sem-andamento">Exportar todas</button>
       </div>
       <div class="card" style="margin-top:14px">
-        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Cancelados, falhos, devolvidos e em manuseio</h3>
+        <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Cancelados, falhos, devolvidos, em manuseio e fora da Abbiamo</h3>
         <div class="modtable-toggle" id="rtEntregaCanceladoHandling" style="margin-bottom:8px"></div>
         <div class="table-wrap" id="rankEntregaCanceladoHandling"></div>
         <button class="iconbtn" style="margin-top:8px" data-export="entrega-cancelado-handling">Exportar todas</button>
@@ -818,7 +832,7 @@ const PALETTE = {navy:'#1E2761', blue:'#1476C4', green:'#1E9E4A', red:'#E30D17',
 const LS_KEYS = {
   pendingOrders:'lm_pending_orders', pendingReport:'lm_pending_report', pendingGestores:'lm_pending_gestores',
   pendingControlados:'lm_pending_controlados',
-  ghToken:'lm_gh_token', theme:'lm_theme',
+  ghToken:'lm_gh_token', theme:'lm_theme', entregaHiddenKpis:'lm_entrega_hidden_kpis',
 };
 
 /* Repositório de publicação fixo — só o token é configurável pelo usuário. */
@@ -980,12 +994,13 @@ const state = {
   entregaModalTab: 'Todas',
   rankGroupBy: {
     retiradaAberto:'filial', retiradaSep:'filial', retiradaSemFinalizar:'filial',
-    entregaAtraso:'filial', entregaSep:'filial', entregaSemAndamento:'filial',
+    entregaAtraso:'filial', entregaSep:'filial', entregaSemAndamento:'filial', entregaCanceladoHandling:'filial',
   },
   rankSortDir: {
     retiradaAberto:'desc', retiradaSep:'desc', retiradaSemFinalizar:'desc',
-    entregaAtraso:'desc', entregaSep:'desc', entregaSemAndamento:'desc',
+    entregaAtraso:'desc', entregaSep:'desc', entregaSemAndamento:'desc', entregaCanceladoHandling:'desc',
   },
+  entregaHiddenKpis: (() => { try { return new Set(JSON.parse(localStorage.getItem(LS_KEYS.entregaHiddenKpis) || '[]')); } catch { return new Set(); } })(),
 };
 
 /* =====================================================================
@@ -1300,9 +1315,17 @@ function computeEntregaGroup(arr, arrVtex, from, to){
 function computeEntrega(rows, rowsVtex, from, to){
   const arr = rows.filter(r => r.orderType==='DELIVERY');
   const arrVtex = (rowsVtex||rows).filter(r => r.orderType==='DELIVERY');
+  const foraAbbiamo = computeForaAbbiamoOrders(from, to);
   const overall = computeEntregaGroup(arr, arrVtex, from, to);
+  overall.foraAbbiamo = foraAbbiamo;
+  overall.foraAbbiamoCount = foraAbbiamo.length;
   const porModalidade = {};
-  for (const mod of ENTREGA_MODALIDADES){ porModalidade[mod] = computeEntregaGroup(arr.filter(r=>r.modalidade===mod), arrVtex.filter(r=>r.modalidade===mod), from, to); }
+  for (const mod of ENTREGA_MODALIDADES){
+    const g = computeEntregaGroup(arr.filter(r=>r.modalidade===mod), arrVtex.filter(r=>r.modalidade===mod), from, to);
+    g.foraAbbiamo = foraAbbiamo.filter(r=>r.modalidade===mod);
+    g.foraAbbiamoCount = g.foraAbbiamo.length;
+    porModalidade[mod] = g;
+  }
   const naoClassificado = arr.filter(r => r.modalidade==='Não classificado' || r.modalidade==='Entrega Rápida (não classificado)');
   return { overall, porModalidade, naoClassificadoCount: naoClassificado.length, arr, arrVtex };
 }
@@ -1524,6 +1547,25 @@ function kpiCard(k){
   </div>`;
 }
 
+/* Checklist "quais cards mostrar" da Entrega — os itens escondidos saem do
+   .kpi-grid (não só display:none), então o grid (auto-fit) reflui sozinho
+   pra preencher o espaço que sobrou. Preferência salva no navegador. */
+function renderEntregaCardsPanel(kpiDefs){
+  const el = document.getElementById('entregaCardsPanel');
+  el.innerHTML = kpiDefs.map(k => `<label>
+    <input type="checkbox" data-kpi-key="${escapeHtml(k.key)}" ${state.entregaHiddenKpis.has(k.key)?'':'checked'}>
+    ${escapeHtml(k.lbl)}
+  </label>`).join('');
+  el.querySelectorAll('input[data-kpi-key]').forEach(cb => {
+    cb.onchange = () => {
+      const key = cb.dataset.kpiKey;
+      if (cb.checked) state.entregaHiddenKpis.delete(key); else state.entregaHiddenKpis.add(key);
+      localStorage.setItem(LS_KEYS.entregaHiddenKpis, JSON.stringify([...state.entregaHiddenKpis]));
+      renderAll();
+    };
+  });
+}
+
 function renderEntrega(rows, rowsVtex){
   const f = state.filters;
   const e = computeEntrega(rows, rowsVtex, f.from, f.to);
@@ -1538,18 +1580,24 @@ function renderEntrega(rows, rowsVtex){
   const rapidaArr = e.overall.arrVtex.filter(r => RAPIDA_MODALIDADES.includes(r.modalidade));
   const rapidaMedSep = avgSep(rapidaArr, f.from, f.to);
   const sepOk = rapidaMedSep!=null && rapidaMedSep<=15;
-  const kpis = [
-    { lbl:'Qtd total pedidos', val:fmtInt(g.total) },
-    { lbl:'Finalizados', val:fmtInt(g.finalizados), accent:'green' },
-    { lbl:'SLA', val:fmtPct(g.sla), accent:(g.sla!=null && g.sla>=0.9)?'green':'red' },
-    { lbl:'No prazo', val:fmtInt(g.noPrazo), accent:'green' },
-    { lbl:'Atraso', val:fmtInt(g.atraso), accent:'red' },
-    { lbl:'Sem andamento', val:fmtInt(g.semAndamento), accent: g.semAndamento>0?'red':undefined },
-    { lbl:'Cancelado/Falho/Manuseio', val:fmtInt(g.canceladoHandling), accent: g.canceladoHandling>0?'red':undefined },
-    { lbl:'Méd. sep. (Rápida)', val:fmtMinutes(rapidaMedSep), sub: rapidaMedSep!=null ? (sepOk?'dentro da meta (15min)':'acima da meta (15min)') : 'sem pedidos rápida no filtro', accent: sepOk?'green':'red' },
-    { lbl:'Taxa de finalizados', val:fmtPct(g.taxaFinalizados), accent:'blue' },
+  const canceladoHandlingArr = g.arr.filter(r=>CANCELADO_HANDLING_STATUS.has(r.status));
+  const canceladoHandlingMerged = [...canceladoHandlingArr, ...g.foraAbbiamo];
+  const kpiDefs = [
+    { key:'total', lbl:'Qtd total pedidos', val:fmtInt(g.total) },
+    { key:'finalizados', lbl:'Finalizados', val:fmtInt(g.finalizados), accent:'green' },
+    { key:'sla', lbl:'SLA', val:fmtPct(g.sla), accent:(g.sla!=null && g.sla>=0.9)?'green':'red' },
+    { key:'noPrazo', lbl:'No prazo', val:fmtInt(g.noPrazo), accent:'green' },
+    { key:'atraso', lbl:'Atraso', val:fmtInt(g.atraso), accent:'red' },
+    { key:'semAndamento', lbl:'Sem andamento', val:fmtInt(g.semAndamento), accent: g.semAndamento>0?'red':undefined },
+    { key:'canceladoHandling', lbl:'Cancelado/Falho/Manuseio/Fora Abbiamo', val:fmtInt(canceladoHandlingMerged.length), accent: canceladoHandlingMerged.length>0?'red':undefined },
+    { key:'medSep', lbl:'Méd. sep. (Rápida)', val:fmtMinutes(rapidaMedSep), sub: rapidaMedSep!=null ? (sepOk?'dentro da meta (15min)':'acima da meta (15min)') : 'sem pedidos rápida no filtro', accent: sepOk?'green':'red' },
+    { key:'taxaFinalizados', lbl:'Taxa de finalizados', val:fmtPct(g.taxaFinalizados), accent:'blue' },
   ];
-  document.getElementById('entregaKpis').innerHTML = kpis.map(kpiCard).join('');
+  const kpis = kpiDefs.filter(k => !state.entregaHiddenKpis.has(k.key));
+  document.getElementById('entregaKpis').innerHTML = kpis.length
+    ? kpis.map(kpiCard).join('')
+    : `<p style="padding:10px;color:var(--ink-muted);font-size:12px">Todos os cards estão ocultos — use "⚙ Cards" pra mostrar algum.</p>`;
+  renderEntregaCardsPanel(kpiDefs);
 
   document.getElementById('slaChart').innerHTML =
     svgStackedBar([{label:'No prazo', value:g.noPrazo, color:PALETTE.green},{label:'Atraso', value:g.atraso, color:PALETTE.red}], {width:460,height:30}) +
@@ -1576,7 +1624,7 @@ function renderEntrega(rows, rowsVtex){
   });
   renderRankSection({
     stateKey:'entregaCanceladoHandling', tabsId:'rtEntregaCanceladoHandling', tableId:'rankEntregaCanceladoHandling', exportKey:'entrega-cancelado-handling',
-    arr:g.arr, valueFn: items => items.filter(r=>CANCELADO_HANDLING_STATUS.has(r.status)).length,
+    arr:canceladoHandlingMerged, valueFn: items => items.length,
     valueLabel:'Quantidade', fmt:v=>fmtInt(v), onlyPositive:true,
   });
 }
@@ -1703,6 +1751,43 @@ function computeForaCobertura(){
   }
   rows.sort((a,b) => b.vtexEntN - a.vtexEntN);
   return { rows, totalFiliaisVtex };
+}
+
+/* Pedidos individuais de ENTREGA que existem no Report da VTEX mas não têm
+   nenhum pedido correspondente na Abbiamo (por número do pedido) — usada pra
+   somar no card "Cancelado/Falho/Manuseio/Fora Abbiamo". Diferente da
+   computeForaCobertura acima (que é por filial, só filial com ZERO entrega
+   na Abbiamo); aqui é por pedido, então também pega gaps parciais numa
+   filial que já tem alguns pedidos na Abbiamo. Filtra por data de criação
+   na VTEX (não tem createdAtAbbiamo pra esses pedidos). */
+function computeForaAbbiamoOrders(from, to){
+  const f = state.filters;
+  const gByCod = new Map(state.gestores.map(g => [normCod(g.cod), g]));
+  const abbiamoOrderSet = new Set(state.rawOrders.filter(o => VALID_ORIGINS.has(o.oco) && o.ot==='DELIVERY').map(o => o.on));
+  const out = [];
+  for (const rep of state.rawReport){
+    if (/retirada em loja/i.test(rep.courrier || '')) continue;
+    if (abbiamoOrderSet.has(rep.order)) continue;
+    const creation = parseAnyDate(rep.creation);
+    if (from && (!creation || creation < from)) continue;
+    if (to && (!creation || creation > to)) continue;
+    const key = normCod(sellerNameToCod(rep.seller));
+    const g = key ? gByCod.get(key) : null;
+    if (f.diretor && (!g || g.diretor !== f.diretor)) continue;
+    if (f.distrital && (!g || g.distrital !== f.distrital)) continue;
+    if (f.regional && (!g || g.coordenador !== f.regional)) continue;
+    if (f.filiais.size && (!g || !f.filiais.has(String(g.cod).trim()))) continue;
+    const courrierClean = repairMojibake(rep.courrier);
+    const modalidade = classifyEntregaModalidade(courrierClean, rep.deadline, parseDeadlineToMinutes(rep.deadline));
+    if (f.modalidades.size && !f.modalidades.has(modalidade)) continue;
+    out.push({
+      orderNumber: rep.order, modalidade, vtexCreation: creation,
+      sellerId: g ? String(g.cod).trim() : (key || rep.seller),
+      filial: g ? g.filial : sellerNameToLabel(rep.seller),
+      coordenador: g?g.coordenador:'', distrital: g?g.distrital:'', diretor: g?g.diretor:'',
+    });
+  }
+  return out;
 }
 
 function renderFora(){
@@ -2049,6 +2134,11 @@ document.getElementById('btnToggleEntrega').onclick = (e) => {
   e.target.textContent = state.entregaVisible ? 'Ocultar' : 'Mostrar';
   applyViewVisibility();
 };
+document.getElementById('btnEntregaCards').onclick = (e) => {
+  e.stopPropagation();
+  document.getElementById('entregaCardsPanel').classList.toggle('open');
+};
+document.addEventListener('click', (e) => { if (!e.target.closest('.kpi-toggle-wrap')) document.getElementById('entregaCardsPanel').classList.remove('open'); });
 document.getElementById('btnToggleSuspeitas').onclick = (e) => {
   state.suspeitasVisible = !state.suspeitasVisible;
   e.target.textContent = state.suspeitasVisible ? 'Ocultar' : 'Mostrar';
