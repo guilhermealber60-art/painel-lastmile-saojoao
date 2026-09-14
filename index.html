@@ -204,6 +204,7 @@ table.dtable tbody tr:hover{background:var(--hover-bg)}
 
 .grid2{display:grid; grid-template-columns:1.15fr .85fr; gap:14px}
 .grid2 > .card{padding:14px}
+.grid2-even{grid-template-columns:1fr 1fr}
 @media (max-width:980px){.grid2{grid-template-columns:1fr}}
 
 .modtable-toggle{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px}
@@ -474,7 +475,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <div class="modtable-toggle" id="modalidadeToggle"></div>
       <div class="kpi-grid" id="entregaKpis"></div>
 
-      <div class="grid2" style="margin-top:14px">
+      <div class="grid2 grid2-even" style="margin-top:14px">
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <h3 style="margin:2px 0;font-size:13px;color:var(--heading);font-weight:800">Nível de serviço por transportadora <span class="sub" id="slaCarrierRangeLabel" style="font-family:var(--font-mono)"></span></h3>
@@ -484,8 +485,13 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
           <div id="slaChart" style="margin-top:10px"></div>
         </div>
         <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Fluxo por etapa (méd. min) — Separação · Coleta · Entrega</h3>
-          <div id="flowChart"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <h3 style="margin:2px 0;font-size:13px;color:var(--heading);font-weight:800">Fluxo por etapa (méd. min) — Separação · Coleta · Entrega <span class="sub" id="fluxoRangeLabel" style="font-family:var(--font-mono)"></span></h3>
+            <div class="modtable-toggle" id="fluxoRangeToggle" style="margin-bottom:0"></div>
+          </div>
+          <div id="fluxoCustomRange" style="display:none;gap:10px;align-items:flex-end;margin:10px 0 0"></div>
+          <div class="modtable-toggle" id="fluxoModalToggle" style="margin:10px 0 0"></div>
+          <div id="flowChart" style="margin-top:10px"></div>
         </div>
       </div>
 
@@ -1019,9 +1025,11 @@ const state = {
     entregaAtraso:'desc', entregaSep:'desc', entregaSemAndamento:'desc', entregaCanceladoHandling:'desc',
   },
   entregaHiddenKpis: (() => { try { return new Set(JSON.parse(localStorage.getItem(LS_KEYS.entregaHiddenKpis) || '[]')); } catch { return new Set(); } })(),
-  /* Janela do gráfico "Nível de serviço por transportadora" — independente
-     do filtro De/Até do topo, sempre últimos 7 dias por padrão. */
+  /* Janela compartilhada pelos gráficos "Nível de serviço por transportadora"
+     e "Fluxo por etapa" — independente do filtro De/Até do topo, sempre
+     últimos 7 dias por padrão. */
   slaCarrierRange: { preset:'7d', from:null, to:null },
+  fluxoModalTab: 'Todas',
 };
 
 /* =====================================================================
@@ -1602,28 +1610,47 @@ function renderEntregaCardsPanel(kpiDefs){
   });
 }
 
-/* Presets de período do gráfico "Nível de serviço por transportadora" —
-   independentes do filtro De/Até do topo (ver resolveSlaCarrierRange). */
-function renderSlaCarrierRangeToggle(){
+/* Presets de período compartilhados pelos gráficos "Nível de serviço por
+   transportadora" e "Fluxo por etapa" — independentes do filtro De/Até do
+   topo (ver resolveSlaCarrierRange). Chamada uma vez por card, cada uma
+   com seus próprios ids de toggle/inputs, mas lendo/escrevendo o mesmo
+   state.slaCarrierRange — trocar o período num card atualiza o outro também. */
+function renderSlaCarrierRangeToggle(toggleElId, customElId, fromInputId, toInputId){
   const presets = [{k:'7d',lbl:'7 dias'},{k:'15d',lbl:'15 dias'},{k:'30d',lbl:'30 dias'},{k:'custom',lbl:'Personalizado'}];
-  const el = document.getElementById('slaCarrierRangeToggle');
+  const el = document.getElementById(toggleElId);
   el.innerHTML = presets.map(p => `<button data-range="${p.k}" class="${state.slaCarrierRange.preset===p.k?'active':''}">${p.lbl}</button>`).join('');
   el.querySelectorAll('button[data-range]').forEach(b => b.onclick = () => {
     state.slaCarrierRange.preset = b.dataset.range;
     renderAll();
   });
-  const customEl = document.getElementById('slaCarrierCustomRange');
+  const customEl = document.getElementById(customElId);
   if (state.slaCarrierRange.preset === 'custom'){
     customEl.style.display = 'flex';
     customEl.innerHTML = `
-      <div class="f-field"><label>De</label><input type="date" id="slaCarrierFrom" value="${state.slaCarrierRange.from?toInputDateStr(state.slaCarrierRange.from):''}"></div>
-      <div class="f-field"><label>Até</label><input type="date" id="slaCarrierTo" value="${state.slaCarrierRange.to?toInputDateStr(state.slaCarrierRange.to):''}"></div>
+      <div class="f-field"><label>De</label><input type="date" id="${fromInputId}" value="${state.slaCarrierRange.from?toInputDateStr(state.slaCarrierRange.from):''}"></div>
+      <div class="f-field"><label>Até</label><input type="date" id="${toInputId}" value="${state.slaCarrierRange.to?toInputDateStr(state.slaCarrierRange.to):''}"></div>
     `;
-    document.getElementById('slaCarrierFrom').onchange = e => { state.slaCarrierRange.from = e.target.value ? new Date(e.target.value+'T00:00:00') : null; renderAll(); };
-    document.getElementById('slaCarrierTo').onchange = e => { state.slaCarrierRange.to = e.target.value ? new Date(e.target.value+'T23:59:59') : null; renderAll(); };
+    document.getElementById(fromInputId).onchange = e => { state.slaCarrierRange.from = e.target.value ? new Date(e.target.value+'T00:00:00') : null; renderAll(); };
+    document.getElementById(toInputId).onchange = e => { state.slaCarrierRange.to = e.target.value ? new Date(e.target.value+'T23:59:59') : null; renderAll(); };
   } else {
     customEl.style.display = 'none';
   }
+}
+/* Filtro de modalidade próprio do card "Fluxo por etapa" — independente da
+   aba de modalidade do topo da Entrega, só afeta esse gráfico. */
+function renderFluxoModalToggle(){
+  const el = document.getElementById('fluxoModalToggle');
+  const tabs = ['Todas', ...ENTREGA_MODALIDADES];
+  el.innerHTML = tabs.map(t => `<button data-mod="${escapeHtml(t)}" class="${state.fluxoModalTab===t?'active':''}">${escapeHtml(t)}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => b.onclick = () => { state.fluxoModalTab = b.dataset.mod; renderAll(); });
+}
+/* Igual computeFlow, mas com fonte e recorte de data/modalidade próprios
+   (applyFiltersNoDate + [from,to] locais), em vez de usar g.arr/g.arrVtex
+   (que vêm presos ao filtro De/Até do topo e à aba de modalidade geral). */
+function computeFlowScoped(modalidadeTab, from, to){
+  const base = applyFiltersNoDate().filter(r => r.orderType==='DELIVERY' && (modalidadeTab==='Todas' || r.modalidade===modalidadeTab));
+  const deliveryArr = base.filter(r => r.createdAtAbbiamo && r.createdAtAbbiamo>=from && r.createdAtAbbiamo<=to);
+  return computeFlow(deliveryArr, base, from, to);
 }
 
 function renderEntrega(rows, rowsVtex){
@@ -1659,9 +1686,10 @@ function renderEntrega(rows, rowsVtex){
     : `<p style="padding:10px;color:var(--ink-muted);font-size:12px">Todos os cards estão ocultos — use "⚙ Cards" pra mostrar algum.</p>`;
   renderEntregaCardsPanel(kpiDefs);
 
-  renderSlaCarrierRangeToggle();
+  renderSlaCarrierRangeToggle('slaCarrierRangeToggle', 'slaCarrierCustomRange', 'slaCarrierFrom', 'slaCarrierTo');
   const slaRange = resolveSlaCarrierRange();
-  document.getElementById('slaCarrierRangeLabel').textContent = `${toInputDateStr(slaRange.from).split('-').reverse().join('/')} – ${toInputDateStr(slaRange.to).split('-').reverse().join('/')}`;
+  const slaRangeTxt = `${toInputDateStr(slaRange.from).split('-').reverse().join('/')} – ${toInputDateStr(slaRange.to).split('-').reverse().join('/')}`;
+  document.getElementById('slaCarrierRangeLabel').textContent = slaRangeTxt;
   const slaPorTransportadora = computeSlaPorTransportadora(state.entregaModalTab, slaRange.from, slaRange.to);
   document.getElementById('slaChart').innerHTML = svgBarChart(
     slaPorTransportadora.map(x => ({
@@ -1671,8 +1699,11 @@ function renderEntrega(rows, rowsVtex){
     { width:460, barH:26, gap:16, labelW:190, max:1, valueFmt:v=>fmtPct(v) }
   );
 
-  const flow = computeFlow(g.arr, g.arrVtex, f.from, f.to);
-  document.getElementById('flowChart').innerHTML = svgBarChart(flow.map(s=>({label:s.label,value:s.minutes})), { width:460, barH:20, gap:12, valueFmt:v=>fmtMinutes(v), color:PALETTE.blue });
+  renderSlaCarrierRangeToggle('fluxoRangeToggle', 'fluxoCustomRange', 'fluxoCarrierFrom', 'fluxoCarrierTo');
+  renderFluxoModalToggle();
+  document.getElementById('fluxoRangeLabel').textContent = slaRangeTxt;
+  const flow = computeFlowScoped(state.fluxoModalTab, slaRange.from, slaRange.to);
+  document.getElementById('flowChart').innerHTML = svgBarChart(flow.map(s=>({label:s.label,value:s.minutes})), { width:460, barH:26, gap:16, labelW:190, valueFmt:v=>fmtMinutes(v), color:PALETTE.blue });
 
   const now = new Date();
   renderRankSection({
