@@ -490,7 +490,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
             <div class="modtable-toggle" id="fluxoRangeToggle" style="margin-bottom:0"></div>
           </div>
           <div id="fluxoCustomRange" style="display:none;gap:10px;align-items:flex-end;margin:10px 0 0"></div>
-          <div class="modtable-toggle" id="fluxoModalToggle" style="margin:10px 0 0"></div>
+          <div class="msel" id="fluxoModalMsel" style="margin:10px 0 0"></div>
           <div id="flowChart" style="margin-top:10px"></div>
         </div>
       </div>
@@ -1029,7 +1029,8 @@ const state = {
      e "Fluxo por etapa" — independente do filtro De/Até do topo, sempre
      últimos 7 dias por padrão. */
   slaCarrierRange: { preset:'7d', from:null, to:null },
-  fluxoModalTab: 'Todas',
+  /* Vazio = todas as modalidades (mesma convenção do filtro geral). */
+  fluxoModalidades: new Set(),
 };
 
 /* =====================================================================
@@ -1637,18 +1638,16 @@ function renderSlaCarrierRangeToggle(toggleElId, customElId, fromInputId, toInpu
   }
 }
 /* Filtro de modalidade próprio do card "Fluxo por etapa" — independente da
-   aba de modalidade do topo da Entrega, só afeta esse gráfico. */
-function renderFluxoModalToggle(){
-  const el = document.getElementById('fluxoModalToggle');
-  const tabs = ['Todas', ...ENTREGA_MODALIDADES];
-  el.innerHTML = tabs.map(t => `<button data-mod="${escapeHtml(t)}" class="${state.fluxoModalTab===t?'active':''}">${escapeHtml(t)}</button>`).join('');
-  el.querySelectorAll('button').forEach(b => b.onclick = () => { state.fluxoModalTab = b.dataset.mod; renderAll(); });
+   aba de modalidade do topo da Entrega, só afeta esse gráfico. Lista
+   suspensa de múltipla escolha (reaproveita buildMultiSelect); vazio = todas. */
+function renderFluxoModalMsel(){
+  buildMultiSelect('fluxoModalMsel', ENTREGA_MODALIDADES.map(m=>({id:m,label:m})), state.fluxoModalidades, 'Todas as modalidades');
 }
 /* Igual computeFlow, mas com fonte e recorte de data/modalidade próprios
    (applyFiltersNoDate + [from,to] locais), em vez de usar g.arr/g.arrVtex
    (que vêm presos ao filtro De/Até do topo e à aba de modalidade geral). */
-function computeFlowScoped(modalidadeTab, from, to){
-  const base = applyFiltersNoDate().filter(r => r.orderType==='DELIVERY' && (modalidadeTab==='Todas' || r.modalidade===modalidadeTab));
+function computeFlowScoped(modalidadesSet, from, to){
+  const base = applyFiltersNoDate().filter(r => r.orderType==='DELIVERY' && (!modalidadesSet.size || modalidadesSet.has(r.modalidade)));
   const deliveryArr = base.filter(r => r.createdAtAbbiamo && r.createdAtAbbiamo>=from && r.createdAtAbbiamo<=to);
   return computeFlow(deliveryArr, base, from, to);
 }
@@ -1700,9 +1699,9 @@ function renderEntrega(rows, rowsVtex){
   );
 
   renderSlaCarrierRangeToggle('fluxoRangeToggle', 'fluxoCustomRange', 'fluxoCarrierFrom', 'fluxoCarrierTo');
-  renderFluxoModalToggle();
+  renderFluxoModalMsel();
   document.getElementById('fluxoRangeLabel').textContent = slaRangeTxt;
-  const flow = computeFlowScoped(state.fluxoModalTab, slaRange.from, slaRange.to);
+  const flow = computeFlowScoped(state.fluxoModalidades, slaRange.from, slaRange.to);
   document.getElementById('flowChart').innerHTML = svgBarChart(flow.map(s=>({label:s.label,value:s.minutes})), { width:460, barH:26, gap:16, labelW:190, valueFmt:v=>fmtMinutes(v), color:PALETTE.blue });
 
   const now = new Date();
