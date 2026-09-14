@@ -220,8 +220,6 @@ table.dtable tbody tr:hover{background:var(--hover-bg)}
 .chart-svg text{font-family:var(--font-body)}
 .bar-label{font-size:11px; fill:var(--ink-2); font-weight:600}
 .bar-value{font-size:11.5px; fill:var(--heading); font-weight:800; font-family:var(--font-mono)}
-.legend{display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:11px; color:var(--ink-2); font-weight:600}
-.legend .sw{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px}
 
 footer{padding:20px; text-align:center; font-size:11px; color:var(--ink-muted)}
 footer .warn{color:var(--amber); font-weight:700}
@@ -478,8 +476,12 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 
       <div class="grid2" style="margin-top:14px">
         <div class="card">
-          <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">No prazo × Atraso</h3>
-          <div id="slaChart"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <h3 style="margin:2px 0;font-size:13px;color:var(--heading);font-weight:800">Nível de serviço por transportadora <span class="sub" id="slaCarrierRangeLabel" style="font-family:var(--font-mono)"></span></h3>
+            <div class="modtable-toggle" id="slaCarrierRangeToggle" style="margin-bottom:0"></div>
+          </div>
+          <div id="slaCarrierCustomRange" style="display:none;gap:10px;align-items:flex-end;margin:10px 0 0"></div>
+          <div id="slaChart" style="margin-top:10px"></div>
         </div>
         <div class="card">
           <h3 style="margin:2px 0 10px;font-size:13px;color:var(--heading);font-weight:800">Fluxo por etapa (méd. min) — Separação · Coleta · Entrega</h3>
@@ -814,6 +816,22 @@ const RESOLVED_STATUS = new Set(['SUCCESSFUL','FAILED','ORDER_FAILED','RETURNED'
 const CANCELADO_HANDLING_STATUS = new Set(['CANCELED','FAILED','ORDER_FAILED','RETURNED','HANDLING','MANUAL_HANDLE']);
 const COLLECT_VIA_TRANSIT_CARRIERS = new Set(['UBER','99-ENTREGAS']);
 
+/* Agrupamento de transportadoras pro gráfico de nível de serviço por
+   transportadora — os demais valores de r.carrier (ALO-MOTOBOY, CORREIOS,
+   DM-LOGISTICA, FENIX-EXPRESS, GIROSS, JA-ENTREGO, KOLLETA-EXPRESS,
+   MG-TRANSPORTES-GO, TOPMOVE, vazio, etc.) caem todos em "Outras". */
+const SAOJOAO_PRIVATE_CARRIERS = new Set(['SAOJOAO-GO','PRIVATE-FLEET']);
+const CARRIER_GROUPS = [
+  { key:'uber99', label:'Uber + 99' },
+  { key:'saojoaoPrivate', label:'São João GO + Private Fleet' },
+  { key:'outras', label:'Outras transportadoras' },
+];
+function carrierGroupKey(carrier){
+  if (COLLECT_VIA_TRANSIT_CARRIERS.has(carrier)) return 'uber99';
+  if (SAOJOAO_PRIVATE_CARRIERS.has(carrier)) return 'saojoaoPrivate';
+  return 'outras';
+}
+
 const MODALIDADES = [
   'Retirada em Loja',
   'Entrega Rápida até 2 horas',
@@ -1001,6 +1019,9 @@ const state = {
     entregaAtraso:'desc', entregaSep:'desc', entregaSemAndamento:'desc', entregaCanceladoHandling:'desc',
   },
   entregaHiddenKpis: (() => { try { return new Set(JSON.parse(localStorage.getItem(LS_KEYS.entregaHiddenKpis) || '[]')); } catch { return new Set(); } })(),
+  /* Janela do gráfico "Nível de serviço por transportadora" — independente
+     do filtro De/Até do topo, sempre últimos 7 dias por padrão. */
+  slaCarrierRange: { preset:'7d', from:null, to:null },
 };
 
 /* =====================================================================
@@ -1343,6 +1364,35 @@ function computeCobertura(rows){
 }
 
 /* =====================================================================
+   NÍVEL DE SERVIÇO POR TRANSPORTADORA
+   Janela própria (padrão: últimos 7 dias), independente do filtro De/Até
+   do topo — por isso usa applyFiltersNoDate() e recorta a data aqui.
+===================================================================== */
+function resolveSlaCarrierRange(){
+  const r = state.slaCarrierRange;
+  if (r.preset==='custom' && r.from && r.to) return { from:r.from, to:r.to };
+  const days = r.preset==='15d' ? 15 : r.preset==='30d' ? 30 : 7;
+  const to = new Date(); to.setHours(23,59,59,999);
+  const from = new Date(); from.setDate(from.getDate()-(days-1)); from.setHours(0,0,0,0);
+  return { from, to };
+}
+function computeSlaPorTransportadora(modalidadeTab, from, to){
+  const buckets = { uber99:[], saojoaoPrivate:[], outras:[] };
+  for (const r of applyFiltersNoDate()){
+    if (r.orderType!=='DELIVERY') continue;
+    if (modalidadeTab!=='Todas' && r.modalidade!==modalidadeTab) continue;
+    if (!r.createdAtAbbiamo || r.createdAtAbbiamo<from || r.createdAtAbbiamo>to) continue;
+    buckets[carrierGroupKey(r.carrier)].push(r);
+  }
+  return CARRIER_GROUPS.map(g => {
+    const arr = buckets[g.key];
+    const finalizados = arr.filter(r=>r.status==='SUCCESSFUL');
+    const noPrazo = finalizados.filter(r=>r.promisedDate && r.deliveredDate && r.promisedDate>=r.deliveredDate).length;
+    return { label:g.label, sla: finalizados.length? noPrazo/finalizados.length : null, n:finalizados.length };
+  });
+}
+
+/* =====================================================================
    FLUXO POR ETAPA
 ===================================================================== */
 function coletaTimestamp(r){
@@ -1459,20 +1509,6 @@ function svgColumnChart(items, opts){
   svg += `</svg>`;
   return svg;
 }
-function svgStackedBar(segments, opts){
-  opts = Object.assign({ width:480, height:34, radius:6 }, opts);
-  const total = segments.reduce((a,s)=>a+s.value,0) || 1;
-  let x = 0;
-  let svg = `<svg class="chart-svg" width="100%" viewBox="0 0 ${opts.width} ${opts.height}" xmlns="http://www.w3.org/2000/svg">`;
-  segments.forEach(s => {
-    const w = Math.max(0, s.value/total*opts.width);
-    if (w>0) svg += `<rect x="${x}" y="0" width="${w}" height="${opts.height}" fill="${s.color}"><title>${escapeHtml(s.label)}: ${fmtInt(s.value)} (${fmtPct(s.value/total)})</title></rect>`;
-    x += w;
-  });
-  svg += `</svg>`;
-  return svg;
-}
-
 /* =====================================================================
    RENDER
 ===================================================================== */
@@ -1566,6 +1602,30 @@ function renderEntregaCardsPanel(kpiDefs){
   });
 }
 
+/* Presets de período do gráfico "Nível de serviço por transportadora" —
+   independentes do filtro De/Até do topo (ver resolveSlaCarrierRange). */
+function renderSlaCarrierRangeToggle(){
+  const presets = [{k:'7d',lbl:'7 dias'},{k:'15d',lbl:'15 dias'},{k:'30d',lbl:'30 dias'},{k:'custom',lbl:'Personalizado'}];
+  const el = document.getElementById('slaCarrierRangeToggle');
+  el.innerHTML = presets.map(p => `<button data-range="${p.k}" class="${state.slaCarrierRange.preset===p.k?'active':''}">${p.lbl}</button>`).join('');
+  el.querySelectorAll('button[data-range]').forEach(b => b.onclick = () => {
+    state.slaCarrierRange.preset = b.dataset.range;
+    renderAll();
+  });
+  const customEl = document.getElementById('slaCarrierCustomRange');
+  if (state.slaCarrierRange.preset === 'custom'){
+    customEl.style.display = 'flex';
+    customEl.innerHTML = `
+      <div class="f-field"><label>De</label><input type="date" id="slaCarrierFrom" value="${state.slaCarrierRange.from?toInputDateStr(state.slaCarrierRange.from):''}"></div>
+      <div class="f-field"><label>Até</label><input type="date" id="slaCarrierTo" value="${state.slaCarrierRange.to?toInputDateStr(state.slaCarrierRange.to):''}"></div>
+    `;
+    document.getElementById('slaCarrierFrom').onchange = e => { state.slaCarrierRange.from = e.target.value ? new Date(e.target.value+'T00:00:00') : null; renderAll(); };
+    document.getElementById('slaCarrierTo').onchange = e => { state.slaCarrierRange.to = e.target.value ? new Date(e.target.value+'T23:59:59') : null; renderAll(); };
+  } else {
+    customEl.style.display = 'none';
+  }
+}
+
 function renderEntrega(rows, rowsVtex){
   const f = state.filters;
   const e = computeEntrega(rows, rowsVtex, f.from, f.to);
@@ -1599,9 +1659,17 @@ function renderEntrega(rows, rowsVtex){
     : `<p style="padding:10px;color:var(--ink-muted);font-size:12px">Todos os cards estão ocultos — use "⚙ Cards" pra mostrar algum.</p>`;
   renderEntregaCardsPanel(kpiDefs);
 
-  document.getElementById('slaChart').innerHTML =
-    svgStackedBar([{label:'No prazo', value:g.noPrazo, color:PALETTE.green},{label:'Atraso', value:g.atraso, color:PALETTE.red}], {width:460,height:30}) +
-    `<div class="legend"><span><span class="sw" style="background:${PALETTE.green}"></span>No prazo (${fmtInt(g.noPrazo)})</span><span><span class="sw" style="background:${PALETTE.red}"></span>Atraso (${fmtInt(g.atraso)})</span></div>`;
+  renderSlaCarrierRangeToggle();
+  const slaRange = resolveSlaCarrierRange();
+  document.getElementById('slaCarrierRangeLabel').textContent = `${toInputDateStr(slaRange.from).split('-').reverse().join('/')} – ${toInputDateStr(slaRange.to).split('-').reverse().join('/')}`;
+  const slaPorTransportadora = computeSlaPorTransportadora(state.entregaModalTab, slaRange.from, slaRange.to);
+  document.getElementById('slaChart').innerHTML = svgBarChart(
+    slaPorTransportadora.map(x => ({
+      label: `${x.label} (${fmtInt(x.n)})`, value: x.sla,
+      color: x.sla==null ? undefined : (x.sla>=0.9 ? PALETTE.green : PALETTE.red),
+    })),
+    { width:460, barH:26, gap:16, labelW:190, max:1, valueFmt:v=>fmtPct(v) }
+  );
 
   const flow = computeFlow(g.arr, g.arrVtex, f.from, f.to);
   document.getElementById('flowChart').innerHTML = svgBarChart(flow.map(s=>({label:s.label,value:s.minutes})), { width:460, barH:20, gap:12, valueFmt:v=>fmtMinutes(v), color:PALETTE.blue });
