@@ -2753,6 +2753,16 @@ function fechScopeLabel(scopeType, scopeVal){
   if (scopeType==='coordenador') return 'Coordenador ' + scopeVal;
   return 'Rede (Geral)';
 }
+/* Iniciais do distrital responsável por um coordenador regional — ex.:
+   coordenador do distrito "Andre Jaime" -> "A.J". Usado só no nome do
+   arquivo de fechamento (scopeType 'coordenador'), pra identificar de
+   cara a que distrital aquele fechamento pertence. */
+function coordenadorDistritalInitials(coordenadorNome){
+  const g = state.gestores.find(g => g.coordenador === coordenadorNome);
+  const distrital = g && g.distrital ? g.distrital.trim() : '';
+  if (!distrital) return '';
+  return distrital.split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase()).join('.');
+}
 function fechRows(tipo, y, mo, scopeType, scopeVal){
   const start = new Date(y, mo, 1, 0, 0, 0);
   const end = new Date(y, mo+1, 1, 0, 0, 0);
@@ -3049,7 +3059,8 @@ document.getElementById('btnGerarFechamento').onclick = async () => {
       const canvas = await html2canvas(el, { scale:2, backgroundColor:'#eef0f6' });
       const a = document.createElement('a');
       const scopeSlug = (scopeType==='geral' ? 'Geral' : scopeVal).replace(/[^\w-]+/g,'_');
-      a.download = `Fechamento_${tipo}_${mesVal}_${scopeSlug}.png`;
+      const distritalIni = scopeType==='coordenador' ? coordenadorDistritalInitials(scopeVal) : '';
+      a.download = `Fechamento_${tipo}_${mesVal}_${scopeSlug}${distritalIni?`_(${distritalIni})`:''}.png`;
       a.href = canvas.toDataURL('image/png');
       a.click();
       ok++;
