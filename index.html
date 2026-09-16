@@ -365,8 +365,8 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
   <button class="topbtn" id="btnOpenDistrital">Relatório diário — Distrital</button>
   <button class="topbtn" id="btnOpenFechamento">Fechamento operacional</button>
   <button class="topbtn" id="btnOpenUpdate">Atualizar dados</button>
-  <button class="topbtn" id="btnPublish">Publicar (snapshot)</button>
-  <button class="themebtn" id="btnConfigPublish" title="Configurar publicação direta no GitHub">⚙️</button>
+  <button class="topbtn" id="btnPublish">Publicar</button>
+  <button class="themebtn" id="btnConfigPublish" title="Configurar token de publicação">⚙️</button>
   <div class="viewtabs" id="quickDateTabs">
     <button type="button" data-qd="hoje">Hoje</button>
     <button type="button" data-qd="ontem">Ontem</button>
@@ -667,8 +667,7 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
       <div style="font-weight:800; font-size:12.5px; color:var(--heading); margin-bottom:6px">Passo 2 — Publicar para todo mundo</div>
       <div style="font-size:11.5px;color:var(--ink-2);line-height:1.6">
         Depois de processar, feche este diálogo e clique em <b>Publicar</b> na barra de cima.
-        Se você já configurou o token (botão ⚙️), a publicação vai direto pro GitHub; se não, o botão baixa os JSON
-        para você subir na pasta <code>data/</code> do repositório.
+        É preciso ter configurado o token de publicação (botão ⚙️) — sem ele o botão fica bloqueado.
       </div>
     </div>
 
@@ -683,22 +682,20 @@ details.settings summary{cursor:pointer; font-weight:700; font-size:12px; color:
 </dialog>
 
 <dialog id="dlgConfig">
-  <div class="dlg-head"><h3>Publicar direto no GitHub</h3><button data-close>×</button></div>
+  <div class="dlg-head"><h3>Publicar (token de acesso)</h3><button data-close>×</button></div>
   <div class="dlg-body">
     <p style="font-size:11.5px;color:var(--ink-2);margin:0 0 12px;line-height:1.6">
-      Com um token configurado, o botão <b>Publicar</b> envia <code>data/orders.json</code>, <code>data/report.json</code> e
-      <code>data/gestores.json</code> direto para o repositório <code>guilhermealber60-art/painel-lastmile-saojoao</code> —
-      sem baixar arquivo, sem git, sem terminal.
+      O botão <b>Publicar</b> envia os pedidos, o report da VTEX, a base de gestores e a de controlados pra API
+      de persistência do painel (Postgres), autenticando com este token.
     </p>
     <div style="padding:10px 12px;border:1px solid var(--red);border-radius:10px;background:var(--red-soft);font-size:11px;color:var(--ink-2);line-height:1.6;margin-bottom:14px">
-      <b>Segurança:</b> o token fica salvo só neste navegador (não é enviado a mim nem a ninguém além do GitHub).
-      Crie um <b>fine-grained token</b> em <b>github.com/settings/tokens</b>, restrito ao repositório
-      <b>painel-lastmile-saojoao</b>, com permissão apenas de <b>Contents: Read and write</b>, e defina uma expiração.
-      Se trocar de computador ou navegador, precisa configurar de novo.
+      <b>Segurança:</b> o token fica salvo só neste navegador. É o mesmo valor configurado como
+      <code>DASHBOARD_PUBLISH_TOKEN</code> no servidor da API (ver <code>server/README.md</code>) — peça a quem administra
+      o servidor caso não tenha. Se trocar de computador ou navegador, precisa colar de novo.
     </div>
     <div class="field-row">
-      <label>Token de acesso (GitHub)</label>
-      <input type="password" id="cfgToken" placeholder="github_pat_…">
+      <label>Token de publicação</label>
+      <input type="password" id="cfgToken" placeholder="cole o token aqui…">
     </div>
   </div>
   <div class="dlg-foot">
@@ -856,13 +853,15 @@ const PALETTE = {navy:'#1E2761', blue:'#1476C4', green:'#1E9E4A', red:'#E30D17',
 const LS_KEYS = {
   pendingOrders:'lm_pending_orders', pendingReport:'lm_pending_report', pendingGestores:'lm_pending_gestores',
   pendingControlados:'lm_pending_controlados',
-  ghToken:'lm_gh_token', theme:'lm_theme', entregaHiddenKpis:'lm_entrega_hidden_kpis',
+  publishToken:'lm_publish_token', theme:'lm_theme', entregaHiddenKpis:'lm_entrega_hidden_kpis',
 };
 
-/* Repositório de publicação fixo — só o token é configurável pelo usuário. */
-const GH_OWNER = 'guilhermealber60-art';
-const GH_REPO  = 'painel-lastmile-saojoao';
-const GH_BRANCH = 'main';
+/* URL base da API de persistência (server/ neste repo, Postgres) — ajuste
+   pro endereço real de onde ela fica disponível no servidor (relativo, se
+   estiver atrás do mesmo reverse proxy que serve este index.html; absoluto,
+   se for host/porta diferente — nesse caso configure DASHBOARD_ALLOWED_ORIGIN
+   no servidor da API pra liberar o CORS deste domínio). */
+const API_BASE = '/lastmile-api';
 
 /* =====================================================================
    THEME (claro/escuro)
@@ -2513,7 +2512,7 @@ document.getElementById('btnProcessFiles').onclick = async () => {
     document.getElementById('pendReportCount').textContent = fmtInt(state.rawReport.length);
     document.getElementById('pendGestoresCount').textContent = fmtInt(state.gestores.length);
     document.getElementById('pendControladosCount').textContent = fmtInt(state.controlados.length);
-    log('Aplicado ao painel neste navegador. Isso ainda NÃO é visível para outras pessoas — role para baixo e clique em "Publicar no GitHub" (ou "Baixar JSON") para tornar público.');
+    log('Aplicado ao painel neste navegador. Isso ainda NÃO é visível para outras pessoas — role para baixo e clique em "Publicar" para tornar público.');
   } catch(err){
     log('ERRO ao processar arquivos: ' + (err && err.message ? err.message : err));
   } finally {
@@ -2531,7 +2530,7 @@ function persistPendingToLocalStorage(){
     // Base grande não cabe no localStorage (~5 MB). Em vez de deixar um snapshot
     // antigo/parcial que sobrescreveria o publicado, apaga o rascunho local.
     clearPendingLocalStorage();
-    log('Aviso: base grande demais para o cache local — os dados vivem no GitHub após publicar (não é problema).');
+    log('Aviso: base grande demais para o cache local — os dados vivem no Postgres após publicar (não é problema).');
   }
 }
 function restorePendingFromLocalStorage(){
@@ -2555,87 +2554,6 @@ document.getElementById('btnWipeAccum').onclick = () => {
   log('Acumulado apagado.');
 };
 
-function downloadJson(filename, data){
-  const blob = new Blob([JSON.stringify(data)], { type:'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
-}
-function downloadBytes(filename, bytes, mime){
-  const blob = new Blob([bytes], { type: mime || 'application/octet-stream' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
-}
-
-/* ---------- gzip helpers (o volume de Orders/Report estoura o limite de blob
-   da API do GitHub — 422 "input too large"; comprimimos antes de subir) ---------- */
-async function gzipStringToBytes(str){
-  const stream = new Blob([str]).stream().pipeThrough(new CompressionStream('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-function bytesToBase64(bytes){
-  let bin = ''; const CH = 0x8000;
-  for (let i=0; i<bytes.length; i+=CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i+CH));
-  return btoa(bin);
-}
-async function fetchGzJson(path){
-  try{
-    const res = await fetch(path, { cache:'no-store' });
-    if (!res.ok) return null;
-    const ds = res.body.pipeThrough(new DecompressionStream('gzip'));
-    const text = await new Response(ds).text();
-    return JSON.parse(text);
-  } catch(e){ return null; }
-}
-
-async function githubApiFetch(url, token, opts, step){
-  const label = step || (opts && opts.method) || 'GET';
-  let res;
-  try{
-    res = await fetch(url, Object.assign({}, opts, {
-      headers: Object.assign({ Authorization:`Bearer ${token}`, Accept:'application/vnd.github+json' }, opts && opts.headers),
-    }));
-  } catch(netErr){
-    console.error(`[publicar] rede falhou em "${label}" (${url}):`, netErr);
-    throw new Error(`Rede falhou em "${label}" — ${netErr.message}. Provável payload grande demais ou bloqueio de rede/extensão.`);
-  }
-  if (!res.ok){ const t = await res.text(); console.error(`[publicar] HTTP ${res.status} em "${label}":`, t.slice(0,300)); throw new Error(`HTTP ${res.status} em "${label}" — ${t.slice(0,200)}`); }
-  return res.json();
-}
-
-/* Contents API (PUT) rejects files over ~1MB; orders.json/report.json can pass
-   that easily, so publish via the Git Data API (blob→tree→commit→ref) instead,
-   which has no such limit and lets all files land in a single commit. */
-async function githubPublishFiles(owner, repo, branch, token, files, message){
-  const base = `https://api.github.com/repos/${owner}/${repo}`;
-  console.log('[publicar] passo 1/5: lendo ref da branch…');
-  const refData = await githubApiFetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, token, null, 'GET ref');
-  const parentCommitSha = refData.object.sha;
-  console.log('[publicar] passo 2/5: lendo commit pai…');
-  const parentCommit = await githubApiFetch(`${base}/git/commits/${parentCommitSha}`, token, null, 'GET commit pai');
-  const baseTreeSha = parentCommit.tree.sha;
-
-  const treeEntries = [];
-  for (const f of files){
-    const b64 = f.contentB64 != null ? f.contentB64 : btoa(unescape(encodeURIComponent(JSON.stringify(f.contentObj))));
-    console.log(`[publicar] passo 3/5: enviando blob ${f.path} — ${(b64.length/1048576).toFixed(1)} MB (base64)…`);
-    const blob = await githubApiFetch(`${base}/git/blobs`, token, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ content:b64, encoding:'base64' }),
-    }, `POST blob ${f.path}`);
-    treeEntries.push({ path:f.path, mode:'100644', type:'blob', sha:blob.sha });
-  }
-  console.log('[publicar] passo 4/5: criando tree + commit…');
-  const newTree = await githubApiFetch(`${base}/git/trees`, token, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ base_tree:baseTreeSha, tree:treeEntries }),
-  }, 'POST tree');
-  const newCommit = await githubApiFetch(`${base}/git/commits`, token, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message, tree:newTree.sha, parents:[parentCommitSha] }),
-  }, 'POST commit');
-  console.log('[publicar] passo 5/5: movendo a branch para o novo commit…');
-  await githubApiFetch(`${base}/git/refs/heads/${encodeURIComponent(branch)}`, token, {
-    method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sha:newCommit.sha }),
-  }, 'PATCH ref');
-  console.log('[publicar] concluído.');
-}
 function showToast(message, type){
   const el = document.createElement('div');
   el.className = 'toast' + (type==='error' ? ' error' : '');
@@ -2645,75 +2563,71 @@ function showToast(message, type){
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 5000);
 }
 
-/* ---------- Publicar (snapshot local OU direto no GitHub) ---------- */
-const ghToken = () => localStorage.getItem(LS_KEYS.ghToken) || '';
+/* ---------- Publicar (grava no Postgres via a API em server/, ver API_BASE) ---------- */
+const publishToken = () => localStorage.getItem(LS_KEYS.publishToken) || '';
 
 function updatePublishBtn(){
   const b = document.getElementById('btnPublish');
-  if (b) b.textContent = ghToken() ? 'Publicar no GitHub' : 'Publicar (snapshot)';
+  if (b) b.textContent = 'Publicar';
 }
 
 const dlgConfig = document.getElementById('dlgConfig');
 dlgConfig.querySelectorAll('[data-close]').forEach(b => b.onclick = () => dlgConfig.close());
 document.getElementById('btnConfigPublish').onclick = () => {
-  document.getElementById('cfgToken').value = ghToken();
+  document.getElementById('cfgToken').value = publishToken();
   dlgConfig.showModal();
 };
 document.getElementById('btnSaveToken').onclick = () => {
   const v = document.getElementById('cfgToken').value.trim();
   if (!v){ showToast('Cole um token válido.', 'error'); return; }
-  localStorage.setItem(LS_KEYS.ghToken, v);
-  updatePublishBtn();
+  localStorage.setItem(LS_KEYS.publishToken, v);
   dlgConfig.close();
-  showToast('Token salvo neste navegador. Publicar agora vai direto pro GitHub.');
+  showToast('Token salvo neste navegador.');
 };
 document.getElementById('btnRemoveToken').onclick = () => {
-  if (!ghToken()){ showToast('Nenhum token salvo.', 'error'); return; }
-  if (!confirm('Remover o token salvo neste navegador? Você volta a precisar baixar e subir os arquivos manualmente. Isso não revoga o token no GitHub — para revogar de vez, apague-o em github.com/settings/tokens.')) return;
-  localStorage.removeItem(LS_KEYS.ghToken);
+  if (!publishToken()){ showToast('Nenhum token salvo.', 'error'); return; }
+  if (!confirm('Remover o token salvo neste navegador? Você não vai conseguir publicar até colar um novo em ⚙️.')) return;
+  localStorage.removeItem(LS_KEYS.publishToken);
   document.getElementById('cfgToken').value = '';
-  updatePublishBtn();
   dlgConfig.close();
   showToast('Token removido deste navegador.');
 };
+
+async function postJson(path, token, body){
+  let res;
+  try{
+    res = await fetch(API_BASE + path, {
+      method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+token }, body: JSON.stringify(body),
+    });
+  } catch(netErr){
+    throw new Error(`Rede falhou em "${path}" — ${netErr.message}.`);
+  }
+  if (!res.ok){ const t = await res.text(); throw new Error(`HTTP ${res.status} em "${path}" — ${t.slice(0,200)}`); }
+  return res.json();
+}
 
 async function publishSnapshot(){
   if (!state.rawOrders.length && !state.rawReport.length){
     showToast('Carregue os dados primeiro em "Atualizar dados".', 'error');
     return;
   }
-  const token = ghToken();
+  const token = publishToken();
+  if (!token){ showToast('Configure o token de publicação (⚙️) antes de publicar.', 'error'); return; }
   const btn = document.getElementById('btnPublish');
   btn.disabled = true;
   const prevLabel = btn.textContent;
-  btn.textContent = token ? 'Publicando…' : 'Compactando…';
+  btn.textContent = 'Publicando…';
   try{
     const mb = arr => (JSON.stringify(arr).length/1048576).toFixed(1);
-    console.log(`[publicar] tamanhos crus — orders: ${mb(state.rawOrders)} MB (${state.rawOrders.length} regs) · report: ${mb(state.rawReport)} MB (${state.rawReport.length} regs) · gestores: ${mb(state.gestores)} MB`);
-    console.log('[publicar] compactando (gzip)…');
-    const ordersGz = await gzipStringToBytes(JSON.stringify(state.rawOrders));
-    const reportGz = await gzipStringToBytes(JSON.stringify(state.rawReport));
-    console.log(`[publicar] gzip — orders: ${(ordersGz.length/1048576).toFixed(1)} MB · report: ${(reportGz.length/1048576).toFixed(1)} MB`);
-
-    if (!token){
-      downloadBytes('orders.json.gz', ordersGz, 'application/gzip');
-      downloadBytes('report.json.gz', reportGz, 'application/gzip');
-      downloadJson('gestores.json', state.gestores);
-      downloadJson('controlados.json', state.controlados);
-      showToast('Arquivos .gz baixados — suba em data/ do repositório. Dica: configure o token (⚙️) para publicar direto.');
-      return;
-    }
-
-    await githubPublishFiles(GH_OWNER, GH_REPO, GH_BRANCH, token, [
-      { path:'data/orders.json.gz', contentB64: bytesToBase64(ordersGz) },
-      { path:'data/report.json.gz', contentB64: bytesToBase64(reportGz) },
-      { path:'data/gestores.json', contentObj: state.gestores },
-      { path:'data/controlados.json', contentObj: state.controlados },
-    ], 'Atualiza dados do painel (orders, report, gestores, controlados)');
+    console.log(`[publicar] tamanhos — orders: ${mb(state.rawOrders)} MB (${state.rawOrders.length} regs) · report: ${mb(state.rawReport)} MB (${state.rawReport.length} regs) · gestores: ${mb(state.gestores)} MB`);
+    await postJson('/data/orders', token, state.rawOrders);
+    await postJson('/data/report', token, state.rawReport);
+    await postJson('/data/gestores', token, state.gestores);
+    await postJson('/data/controlados', token, state.controlados);
     clearPendingLocalStorage(); // publicado é a fonte de verdade; não deixa rascunho velho
-    showToast('Publicado no GitHub! O site atualiza para todos em alguns minutos.');
+    showToast('Publicado! O painel atualiza para todos no próximo carregamento.');
   } catch(err){
-    const msg = /HTTP 401/.test(err.message) ? 'Token inválido ou expirado — abra ⚙️ e cole um token novo.' : err.message;
+    const msg = /HTTP 401/.test(err.message) ? 'Token inválido — abra ⚙️ e cole um token novo.' : err.message;
     showToast('Falha ao publicar: ' + msg, 'error');
   } finally {
     btn.disabled = false;
@@ -3380,17 +3294,15 @@ document.getElementById('btnGerarDistrital').onclick = async () => {
 /* =====================================================================
    BOOT
 ===================================================================== */
-async function fetchJsonSafe(path){
-  try{ const res = await fetch(path, { cache:'no-store' }); if (!res.ok) return null; return await res.json(); } catch(e){ return null; }
-}
-/* Prefere o .gz (formato novo); cai pro .json cru se ainda não houver .gz publicado.
-   Cache-busting (?t=) garante que o navegador e o CDN do GitHub Pages nunca sirvam
-   uma versão antiga do arquivo. */
-async function fetchDataFile(basePath){
-  const bust = '?t=' + Date.now();
-  const gz = await fetchGzJson(basePath + '.gz' + bust);
-  if (gz != null) return gz;
-  return fetchJsonSafe(basePath + bust);
+/* Lê um endpoint de leitura da API (ver API_BASE) — null em qualquer falha
+   (rede fora do ar, API sem esse dado ainda, etc.), pro boot() cair no
+   rascunho local (localStorage) como já fazia antes. */
+async function fetchApiJson(path){
+  try{
+    const res = await fetch(API_BASE + path, { cache:'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch(e){ return null; }
 }
 function clearPendingLocalStorage(){
   try{
@@ -3403,7 +3315,7 @@ function clearPendingLocalStorage(){
 async function boot(){
   updatePublishBtn();
   const [pubOrders, pubReport, pubGestores, pubControlados] = await Promise.all([
-    fetchDataFile('data/orders.json'), fetchDataFile('data/report.json'), fetchDataFile('data/gestores.json'), fetchDataFile('data/controlados.json'),
+    fetchApiJson('/data/orders.json'), fetchApiJson('/data/report.json'), fetchApiJson('/data/gestores.json'), fetchApiJson('/data/controlados.json'),
   ]);
   if (pubControlados) state.controlados = pubControlados;
   // Os dados PUBLICADOS são a fonte de verdade e têm prioridade sobre o localStorage.
