@@ -2763,6 +2763,10 @@ function coordenadorDistritalInitials(coordenadorNome){
   if (!distrital) return '';
   return distrital.split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase()).join('.');
 }
+function coordenadorDistritalNome(coordenadorNome){
+  const g = state.gestores.find(g => g.coordenador === coordenadorNome);
+  return g && g.distrital ? g.distrital.trim() : '';
+}
 function fechRows(tipo, y, mo, scopeType, scopeVal){
   const start = new Date(y, mo, 1, 0, 0, 0);
   const end = new Date(y, mo+1, 1, 0, 0, 0);
@@ -3001,9 +3005,10 @@ function fechPlannedCombos(){
   return { combos, scopeType };
 }
 function updateFechCountHint(){
-  const { combos } = fechPlannedCombos();
+  const { combos, scopeType } = fechPlannedCombos();
   const hint = document.getElementById('fechCountHint');
-  hint.textContent = combos.length > 1 ? `Serão geradas ${combos.length} imagens (baixadas uma a uma).` : combos.length===1 ? '1 imagem será gerada.' : 'Escolha um valor de escopo (ou marque "gerar para todos").';
+  const porDistrito = scopeType==='coordenador' && combos.length > 1 ? ' Organizadas em subpastas por distrito.' : '';
+  hint.textContent = combos.length > 1 ? `Serão geradas ${combos.length} imagens (baixadas uma a uma).${porDistrito}` : combos.length===1 ? '1 imagem será gerada.' : 'Escolha um valor de escopo (ou marque "gerar para todos").';
 }
 document.getElementById('btnOpenFechamento').onclick = () => {
   if (!state.joined.length){ showToast('Carregue os dados primeiro.', 'error'); return; }
@@ -3060,7 +3065,12 @@ document.getElementById('btnGerarFechamento').onclick = async () => {
       const a = document.createElement('a');
       const scopeSlug = (scopeType==='geral' ? 'Geral' : scopeVal).replace(/[^\w-]+/g,'_');
       const distritalIni = scopeType==='coordenador' ? coordenadorDistritalInitials(scopeVal) : '';
-      a.download = `Fechamento_${tipo}_${mesVal}_${scopeSlug}${distritalIni?`_(${distritalIni})`:''}.png`;
+      // Coordenador regional: agrupa os PNGs numa subpasta por distrito
+      // (o atributo download com "/" cria a subpasta dentro de Downloads
+      // nos navegadores baseados em Chromium).
+      const distritalNome = scopeType==='coordenador' ? coordenadorDistritalNome(scopeVal) : '';
+      const distritalFolder = distritalNome ? `Fechamento_${mesVal}_${distritalNome.replace(/[^\w-]+/g,'_')}/` : '';
+      a.download = `${distritalFolder}Fechamento_${tipo}_${mesVal}_${scopeSlug}${distritalIni?`_(${distritalIni})`:''}.png`;
       a.href = canvas.toDataURL('image/png');
       a.click();
       ok++;
